@@ -79,6 +79,18 @@ backprop” — it beat Split Acc, and matched StepBP Acc on Dense this run.
 
 `ModeTweenSplitHeadProxy` / `ModeTweenSplitLinear` · `layers/parallel/tween_split_w.go`
 
+### FastProxy / LinearCache / HeadProxyAsync / Sparse — keep (unscored)
+
+Same Split family, opt-in on test41. One collect tape; Dense `dW`-only + `MatVecT`;
+never form \(\tilde W=W_{\mathrm{head}}W_{\mathrm{hemi}}\).
+
+- **FastProxy** — \(g_{\mathrm{proxy}}=W_{\mathrm{head}}^\top g_y\) (no act′), hidden \(1/(N-1)\) Split, all leaves `dW`-only.
+- **LinearCache** — Linear walk cached every 20 steps; live loop scales by \(\|g_y\|\).
+- **HeadProxyAsync** — hidden use linearized proxy from sample \(T-1\) (not EMA).
+- **Sparse** — head + one rotating hidden leaf.
+
+Re-run `test41_w_native_cam` before claiming Score vs StepBP.
+
 ---
 
 ## Dead

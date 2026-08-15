@@ -25,16 +25,20 @@ MobileScore). Full dtype×quant matrix → [`test41_w_native_cam_perm`](../test4
 
 Split / Alt train via `TrainStackMSE` (Grid `tween.State` has no Split/Alt). BP/Tween uniform jobs stay on the Grid loop so the historical board is comparable. `-alt-times` sets Split→Tween pairs for TweenAlt.
 
-Opt-in Split variants (not in `-modes all`): **HeadProxy**, **Linear**. Graveyard: [`../failed.md`](../failed.md).
+Opt-in Split variants (not in `-modes all`). Works on every sandwich Op (Dense, CNN, Sequential, Residual, …) — Dense uses SIMD \(W^\top\) / `dW`-only; other Ops fall back to local backward. Graveyard: [`../failed.md`](../failed.md).
 
 | Token | Mode | Credit |
 |-------|------|--------|
-| `headproxy` | TweenSplitHeadProxy | Head: full \(g_y\) + real \(J_{\mathrm{head}}^\top\). Hidden: \(\frac{1}{N-1}P(g_{\mathrm{proxy}})\). Acc 48–67%. |
-| `linear` | TweenSplitLinear | \(g_i=\frac{1}{N}P(\tilde W_i^\top g_y)\). Dense \(W^\top\) only, skip \(\odot\mathrm{act}'\). Acc 67–77% (Dense matched StepBP this run). Score still loses on Avail. |
+| `headproxy` | TweenSplitHeadProxy | Head: full \(g_y\) + \(J_{\mathrm{head}}^\top\). Hidden: \(\frac{1}{N-1}P(g_{\mathrm{proxy}})\) **`dW` only**. One tape. |
+| `linear` | TweenSplitLinear | \(g_i=\frac{1}{N}P(\tilde W_i^\top g_y)\). One SIMD \(W^\top\) walk, never \(W\times W\). One tape. |
+| `fastproxy` | TweenSplitFastProxy | \(g_{\mathrm{proxy}}=W_{\mathrm{head}}^\top g_y\) (no act′). All leaves `dW`-only. No head-backward lock. |
+| `linearcache` | TweenSplitLinearCache | Same math as Linear; refresh the per-leaf direction every 20 steps, scale by \(\\|g_y\\|\) in between. |
+| `proxyasync` | TweenSplitHeadProxyAsync | Hidden use proxy from sample \(T-1\); head computes \(T\). Seed on first sample. Not EMA. |
+| `sparse` | TweenSplitSparse | Head + one rotating hidden leaf per sample. Acc risk, real FLOP cut. |
 
 ```bash
 cd apps/aai/test41_w_native_cam
-go run . -modes stepbp,tweensplit,steptweensplit,headproxy,linear
+go run . -modes stepbp,tweensplit,steptweensplit,headproxy,linear,fastproxy,linearcache,proxyasync,sparse
 ```
 
 ### Mix — distinct-mode permutations on Bi / Tri / Quad
@@ -83,8 +87,8 @@ go run . -modes tweenalt,steptweenalt -alt-times 3
 cd loom/arcagitesting/test41_w_native_cam
 go run .
 
-# Split vs HeadProxy / Linear (10s default)
-go run . -modes stepbp,tweensplit,steptweensplit,headproxy,linear
+# Split vs HeadProxy / Linear / FastProxy (10s default)
+go run . -modes stepbp,tweensplit,steptweensplit,headproxy,linear,fastproxy,linearcache,proxyasync,sparse
 
 # Split / Alt vs the old six (short race)
 go run . -modes tweensplit,steptweensplit,tweenalt,steptweenalt -duration 2s -switch 500ms -adapt-windows 4

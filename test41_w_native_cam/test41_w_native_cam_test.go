@@ -68,7 +68,7 @@ func TestBuildJobsUniformCount(t *testing.T) {
 }
 
 func TestParseJobModesWeightedOptIn(t *testing.T) {
-	seq, mesh, err := parseJobModes("stepbp,tweensplit,steptweensplit,headproxy,linear")
+	seq, mesh, err := parseJobModes("stepbp,tweensplit,steptweensplit,headproxy,linear,fastproxy,linearcache,proxyasync,sparse")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +78,8 @@ func TestParseJobModesWeightedOptIn(t *testing.T) {
 	want := []TrainingMode{
 		ModeStepBP, ModeTweenSplit, ModeStepTweenSplit,
 		ModeTweenSplitHeadProxy, ModeTweenSplitLinear,
+		ModeTweenSplitFastProxy, ModeTweenSplitLinearCache,
+		ModeTweenSplitHeadProxyAsync, ModeTweenSplitSparse,
 	}
 	if len(seq) != len(want) {
 		t.Fatalf("got %v", seq)
@@ -89,6 +91,12 @@ func TestParseJobModesWeightedOptIn(t *testing.T) {
 	}
 	if _, ok := toParallelMode(ModeTweenSplitHeadProxy); !ok {
 		t.Fatal("headproxy should be Stack credit")
+	}
+	if _, ok := toParallelMode(ModeTweenSplitFastProxy); !ok {
+		t.Fatal("fastproxy should be Stack credit")
+	}
+	if _, ok := toParallelMode(ModeTweenSplitSparse); !ok {
+		t.Fatal("sparse should be Stack credit")
 	}
 }
 

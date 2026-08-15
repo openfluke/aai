@@ -41,8 +41,9 @@ import (
 //	Mix        — Hemispheres(n=6): one of each seq mode (canonical hex)
 //
 // Uniform Bi/Tri/Quad BP/Tween train through the Grid loop (one mode for the whole net).
-// TweenSplit / StepTweenSplit / TweenAlt / StepTweenAlt are Stack + TrainStackMSE
-// (Grid tween.State has no Split/Alt). Mix perms stay the original 6 seq modes.
+// TweenSplit family + Alt train via Stack credit (OpenSplitTape / TrainStackMSE).
+// Opt-in: HeadProxy, Linear, FastProxy, LinearCache, HeadProxyAsync, Sparse.
+// Mix perms stay the original 6 seq modes.
 // Mix variants: distinct-mode permutations on Bi/Tri/Quad (+ optional hex),
 // trained via Stack + TrainStackMSE. -mix off|bi|tri|quad|all (default off).
 //
@@ -124,27 +125,35 @@ const (
 	ModeStepTweenAlt
 	ModeTweenSplitHeadProxy
 	ModeTweenSplitLinear
+	ModeTweenSplitFastProxy
+	ModeTweenSplitLinearCache
+	ModeTweenSplitHeadProxyAsync
+	ModeTweenSplitSparse
 	ModeMeshBP
 	ModeMeshTween
 	ModeMeshTweenChain
 )
 
 var modeNames = map[TrainingMode]string{
-	ModeNormalBP:            "NormalBP",
-	ModeStepBP:              "StepBP",
-	ModeTween:               "Tween",
-	ModeTweenChain:          "TweenChain",
-	ModeStepTween:           "StepTween",
-	ModeStepTweenChain:      "StepTweenChain",
-	ModeTweenSplit:          "TweenSplit",
-	ModeStepTweenSplit:      "StepTweenSplit",
-	ModeTweenAlt:            "TweenAlt",
-	ModeStepTweenAlt:        "StepTweenAlt",
-	ModeTweenSplitHeadProxy: "TweenSplitHeadProxy",
-	ModeTweenSplitLinear:    "TweenSplitLinear",
-	ModeMeshBP:              "MeshBP",
-	ModeMeshTween:           "MeshTween",
-	ModeMeshTweenChain:      "MeshTweenChain",
+	ModeNormalBP:                 "NormalBP",
+	ModeStepBP:                   "StepBP",
+	ModeTween:                    "Tween",
+	ModeTweenChain:               "TweenChain",
+	ModeStepTween:                "StepTween",
+	ModeStepTweenChain:           "StepTweenChain",
+	ModeTweenSplit:               "TweenSplit",
+	ModeStepTweenSplit:           "StepTweenSplit",
+	ModeTweenAlt:                 "TweenAlt",
+	ModeStepTweenAlt:             "StepTweenAlt",
+	ModeTweenSplitHeadProxy:      "TweenSplitHeadProxy",
+	ModeTweenSplitLinear:         "TweenSplitLinear",
+	ModeTweenSplitFastProxy:      "TweenSplitFastProxy",
+	ModeTweenSplitLinearCache:    "TweenSplitLinearCache",
+	ModeTweenSplitHeadProxyAsync: "TweenSplitHeadProxyAsync",
+	ModeTweenSplitSparse:         "TweenSplitSparse",
+	ModeMeshBP:                   "MeshBP",
+	ModeMeshTween:                "MeshTween",
+	ModeMeshTweenChain:           "MeshTweenChain",
 }
 
 func isMeshMode(m TrainingMode) bool {
@@ -154,7 +163,9 @@ func isMeshMode(m TrainingMode) bool {
 func isStackCreditMode(m TrainingMode) bool {
 	switch m {
 	case ModeTweenSplit, ModeStepTweenSplit, ModeTweenAlt, ModeStepTweenAlt,
-		ModeTweenSplitHeadProxy, ModeTweenSplitLinear:
+		ModeTweenSplitHeadProxy, ModeTweenSplitLinear,
+		ModeTweenSplitFastProxy, ModeTweenSplitLinearCache,
+		ModeTweenSplitHeadProxyAsync, ModeTweenSplitSparse:
 		return true
 	default:
 		return false
@@ -175,6 +186,14 @@ func toParallelMode(m TrainingMode) (parallel.TrainMode, bool) {
 		return parallel.ModeTweenSplitHeadProxy, true
 	case ModeTweenSplitLinear:
 		return parallel.ModeTweenSplitLinear, true
+	case ModeTweenSplitFastProxy:
+		return parallel.ModeTweenSplitFastProxy, true
+	case ModeTweenSplitLinearCache:
+		return parallel.ModeTweenSplitLinearCache, true
+	case ModeTweenSplitHeadProxyAsync:
+		return parallel.ModeTweenSplitHeadProxyAsync, true
+	case ModeTweenSplitSparse:
+		return parallel.ModeTweenSplitSparse, true
 	default:
 		return 0, false
 	}
@@ -272,7 +291,7 @@ func main() {
 	window := flag.Duration("window", WindowDuration, "SoftAcc window")
 	adaptN := flag.Int("adapt-windows", AdaptWindows, "pulse windows after switch folded into AdaptPct")
 	mixScope := flag.String("mix", "off", "Mix distinct-mode perms: off | bi | tri | quad | all (+hex)")
-	modesFlag := flag.String("modes", "all", "all, or comma list: normalbp,stepbp,tween,tweenchain,steptween,steptweenchain,tweensplit,steptweensplit,tweenalt,steptweenalt[,meshbp,meshtween,meshtweenchain]")
+	modesFlag := flag.String("modes", "all", "all, or comma list: normalbp,stepbp,tween,tweenchain,steptween,steptweenchain,tweensplit,steptweensplit,tweenalt,steptweenalt[,headproxy,linear,fastproxy,linearcache,proxyasync,sparse][,meshbp,meshtween,meshtweenchain]")
 	altTimesFlag := flag.Int("alt-times", 1, "TweenAlt: Split→Tween pairs per TrainStackMSE")
 	flag.Parse()
 
@@ -425,6 +444,14 @@ func parseJobModes(s string) (seq, mesh []TrainingMode, err error) {
 			m = ModeTweenSplitHeadProxy
 		case "linear", "tweensplitlinear":
 			m = ModeTweenSplitLinear
+		case "fastproxy", "tweensplitfastproxy":
+			m = ModeTweenSplitFastProxy
+		case "linearcache", "tweensplitlinearcache", "cachedlinear":
+			m = ModeTweenSplitLinearCache
+		case "proxyasync", "headproxyasync", "async", "tweensplitheadproxyasync":
+			m = ModeTweenSplitHeadProxyAsync
+		case "sparse", "tweensplitsparse":
+			m = ModeTweenSplitSparse
 		case "meshbp":
 			m, isMesh = ModeMeshBP, true
 		case "meshtween":
@@ -974,9 +1001,24 @@ func runStackMSELoop(label, arch, mode string, stack *parallel.Stack, parent par
 		y := targetTensor(target, false)
 
 		tInf := startWork()
-		_, post, ferr := parallel.ForwardStack(stack, x)
+		var post *core.Tensor[float32]
+		var splitTape *parallel.SplitTape[float32]
+		if parent.IsSplitFamily() {
+			tape, err := parallel.OpenSplitTape(stack, x)
+			if err != nil || tape == nil || tape.Post == nil {
+				continue
+			}
+			splitTape = tape
+			post = tape.Post
+		} else {
+			_, p, ferr := parallel.ForwardStack(stack, x)
+			if ferr != nil || p == nil {
+				continue
+			}
+			post = p
+		}
 		inferDur := tInf.elapsed()
-		if ferr != nil || post == nil {
+		if post == nil {
 			continue
 		}
 		totalInfer += inferDur
@@ -996,7 +1038,11 @@ func runStackMSELoop(label, arch, mode string, stack *parallel.Stack, parent par
 		}
 
 		t0 := startWork()
-		_, _ = parallel.TrainStackMSE(stack, x, y, parent, LearningRate)
+		if splitTape != nil {
+			_, _ = splitTape.Train(y, parent, LearningRate)
+		} else {
+			_, _ = parallel.TrainStackMSE(stack, x, y, parent, LearningRate)
+		}
 		trainDur := t0.elapsed()
 		if trainDur > 0 {
 			totalTrain += trainDur
