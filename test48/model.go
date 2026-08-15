@@ -75,7 +75,7 @@ func camName(nHemi int) string {
 // buildNativeCameral is Dense(in→hidden) → native Hemispheres(n, add) → Dense(hidden→out).
 // trained via Stack + TrainStackMSE. Hemispheres are `kind`.
 // (View-wrapped when the Op wants spatial/seq rank). nHemi≤1 is one mid Op.
-func buildNativeCameral(kind CellKind, in, hidden, out, nHemi int, mode parallel.TrainMode) (*parallel.Stack, error) {
+func buildNativeCameral(kind CellKind, in, hidden, out, nHemi int, mode parallel.TrainMode, dt core.DType) (*parallel.Stack, error) {
 	if in <= 0 || hidden <= 0 || out <= 0 {
 		return nil, fmt.Errorf("test48: need positive in/hidden/out")
 	}
@@ -124,9 +124,15 @@ func buildNativeCameral(kind CellKind, in, hidden, out, nHemi int, mode parallel
 	if err != nil {
 		return nil, err
 	}
-	// Dense hemispheres use SIMD DotTile (FormatNone f32). Other Ops train on CPU tiled.
+	if dt != core.DTypeFloat32 {
+		if err := s.SetDType(dt); err != nil {
+			return nil, fmt.Errorf("set dtype %s: %w", dt, err)
+		}
+	}
+	// Dense + FormatNone f32 uses SIMD DotTile. Other kinds, and non-f32
+	// storage, train on CPU tiled so backend is not a hidden dtype axis.
 	s.Exec.Backend = core.BackendCPUTiled
-	if kind == KindDense {
+	if kind == KindDense && dt == core.DTypeFloat32 {
 		s.Exec.Backend = core.BackendSIMD
 	}
 	s.Exec.MultiCore = true

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/openfluke/welvet/core"
@@ -112,6 +113,66 @@ func kindsCSV(kinds []CellKind) string {
 	parts := make([]string, len(kinds))
 	for i, k := range kinds {
 		parts[i] = string(k)
+	}
+	return strings.Join(parts, ",")
+}
+
+func parseDTypeList(s string) ([]core.DType, error) {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.EqualFold(s, "all") {
+		out := make([]core.DType, len(core.AllDTypes))
+		copy(out, core.AllDTypes)
+		return out, nil
+	}
+	out := make([]core.DType, 0)
+	seen := map[core.DType]bool{}
+	for _, p := range splitLayerTokens(s) {
+		dt, err := parseDTypeToken(p)
+		if err != nil {
+			return nil, err
+		}
+		if seen[dt] {
+			continue
+		}
+		seen[dt] = true
+		out = append(out, dt)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no dtypes")
+	}
+	return out, nil
+}
+
+func parseDTypeToken(p string) (core.DType, error) {
+	p = strings.ToLower(strings.TrimSpace(p))
+	if p == "" {
+		return 0, fmt.Errorf("empty dtype")
+	}
+	switch p {
+	case "f32", "float32", "fp32":
+		return core.DTypeFloat32, nil
+	case "f64", "float64", "fp64", "double":
+		return core.DTypeFloat64, nil
+	case "f16", "float16", "fp16":
+		return core.DTypeFloat16, nil
+	case "bf16", "bfloat16":
+		return core.DTypeBFloat16, nil
+	}
+	for _, dt := range core.AllDTypes {
+		if strings.ToLower(dt.String()) == p {
+			return dt, nil
+		}
+	}
+	if n, err := strconv.Atoi(p); err == nil && n >= 0 && n <= 33 {
+		return core.DType(n), nil
+	}
+	return 0, fmt.Errorf("unknown dtype %q", p)
+}
+
+func dtypesCSV(dts []core.DType) string {
+	parts := make([]string, len(dts))
+	for i, dt := range dts {
+		parts[i] = dt.String()
 	}
 	return strings.Join(parts, ",")
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/parallel"
 )
 
@@ -74,7 +75,7 @@ func TestXORStepBPAndFastProxySmoke(t *testing.T) {
 		parallel.ModeTweenSplitFastProxy,
 		parallel.ModeTweenSplitSparse,
 	} {
-		j := job{task: task, kind: KindDense, nHemi: 1, mode: mode}
+		j := job{task: task, kind: KindDense, nHemi: 1, mode: mode, dt: core.DTypeFloat32}
 		r := runLucyJob(j, 32, 80*time.Millisecond, 40*time.Millisecond, 0.05, 1, 2)
 		if r.Err != "" {
 			t.Fatalf("%s: %s", mode, r.Err)
@@ -93,7 +94,7 @@ func TestSineSwitchSmoke(t *testing.T) {
 	if len(task.pools) != 4 {
 		t.Fatalf("sine pools %d", len(task.pools))
 	}
-	j := job{task: task, kind: KindDense, nHemi: 2, mode: parallel.ModeStepBP}
+	j := job{task: task, kind: KindDense, nHemi: 2, mode: parallel.ModeStepBP, dt: core.DTypeFloat32}
 	r := runLucyJob(j, 32, 80*time.Millisecond, 20*time.Millisecond, 0.05, 1, 2)
 	if r.Err != "" {
 		t.Fatal(r.Err)
@@ -103,5 +104,72 @@ func TestSineSwitchSmoke(t *testing.T) {
 func TestCameralCap(t *testing.T) {
 	if camName(1) != "Dense" || camName(2) != "Bicameral" || camName(3) != "Tricameral" {
 		t.Fatal(camName(1), camName(2), camName(3))
+	}
+}
+
+func TestParseDTypesAll(t *testing.T) {
+	dts, err := parseDTypeList("all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dts) != len(core.AllDTypes) {
+		t.Fatalf("all dtypes %d want %d", len(dts), len(core.AllDTypes))
+	}
+	if dts[0] != core.DTypeFloat64 || dts[1] != core.DTypeFloat32 {
+		t.Fatalf("order: %v %v", dts[0], dts[1])
+	}
+}
+
+func TestParseDTypesOptIn(t *testing.T) {
+	dts, err := parseDTypeList("float32,f16,int8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []core.DType{core.DTypeFloat32, core.DTypeFloat16, core.DTypeInt8}
+	if len(dts) != len(want) {
+		t.Fatalf("got %v", dts)
+	}
+	for i := range want {
+		if dts[i] != want[i] {
+			t.Fatalf("got %v want %v", dts, want)
+		}
+	}
+}
+
+func TestParseDTypesUnknown(t *testing.T) {
+	if _, err := parseDTypeList("notatype"); err == nil {
+		t.Fatal("want error")
+	}
+}
+
+func TestFloat16XORSmoke(t *testing.T) {
+	task := makeXOR()
+	j := job{task: task, kind: KindDense, nHemi: 1, mode: parallel.ModeStepBP, dt: core.DTypeFloat16}
+	r := runLucyJob(j, 32, 80*time.Millisecond, 40*time.Millisecond, 0.05, 1, 2)
+	if r.Err != "" {
+		t.Fatal(r.Err)
+	}
+	if r.DType != "float16" {
+		t.Fatalf("dtype %s", r.DType)
+	}
+	if r.Steps < 1 {
+		t.Fatal("no steps")
+	}
+}
+
+func TestWeightDTypeSmoke(t *testing.T) {
+	task := makeXOR()
+	for _, dt := range []core.DType{
+		core.DTypeFloat64, core.DTypeFloat32, core.DTypeBFloat16,
+		core.DTypeInt8, core.DTypeBinary, core.DTypeNF4,
+	} {
+		j := job{task: task, kind: KindDense, nHemi: 1, mode: parallel.ModeTweenSplitFastProxy, dt: dt}
+		r := runLucyJob(j, 16, 40*time.Millisecond, 20*time.Millisecond, 0.05, 1, 2)
+		if r.Err != "" {
+			t.Errorf("%s: %s", dt, r.Err)
+		}
+		if r.DType != dt.String() {
+			t.Errorf("%s: row dtype %s", dt, r.DType)
+		}
 	}
 }

@@ -19,7 +19,8 @@ import (
 	"github.com/openfluke/welvet/systems/dna"
 )
 
-// TEST 48 — test41 credit modes × every layer kind × xor/sine/copy × 1..3 cameral.
+// TEST 48 — test41 credit modes × every layer kind × xor/sine/copy × 1..3 cameral
+// × FormatNone weight dtypes (activations stay float32; weight dtype ⊥ act T).
 //
 // Same Lucy measuring as test41_w_native_cam (SoftAcc, hard Acc, Avail, AdaptPct,
 // Score, Tput, InferMs/TrainMs). Traditional backprop is StepBP (BackwardStack).
@@ -53,10 +54,12 @@ type job struct {
 	kind  CellKind
 	nHemi int
 	mode  parallel.TrainMode
+	dt    core.DType
 }
 
 type row struct {
 	Task    string        `json:"task"`
+	DType   string        `json:"dtype"`
 	Layer   string        `json:"layer"`
 	Arch    string        `json:"arch"`
 	Mode    string        `json:"mode"`
@@ -90,6 +93,7 @@ func main() {
 	workers := flag.Int("workers", 0, "concurrent jobs (0 = NumCPU; 1 = Lucy-honest Score)")
 	tasksFlag := flag.String("tasks", "xor,sine,copy", "xor,sine,copy")
 	modesFlag := flag.String("modes", "all", "all = test41 stack modes, or comma list")
+	dtypesFlag := flag.String("dtypes", "all", "all = 34 core.AllDTypes, or comma list (weight storage; act stays f32)")
 	altTimes := flag.Int("alt-times", 1, "TweenAlt: Split→Tween pairs per sample")
 	flag.Parse()
 
@@ -99,6 +103,11 @@ func main() {
 		os.Exit(2)
 	}
 	modes, err := parseModes(*modesFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+		os.Exit(2)
+	}
+	dtypes, err := parseDTypeList(*dtypesFlag)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
 		os.Exit(2)
@@ -144,20 +153,24 @@ func main() {
 
 	var jobs []job
 	for _, t := range tasks {
-		for _, k := range kinds {
-			for n := *camMin; n <= *camerals; n++ {
-				for _, m := range modes {
-					jobs = append(jobs, job{task: t, kind: k, nHemi: n, mode: m})
+		for _, dt := range dtypes {
+			for _, k := range kinds {
+				for n := *camMin; n <= *camerals; n++ {
+					for _, m := range modes {
+						jobs = append(jobs, job{task: t, kind: k, nHemi: n, mode: m, dt: dt})
+					}
 				}
 			}
 		}
 	}
 
 	fmt.Println("╔═════════════════════════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║   TEST 48 — test41 modes × all layers × xor/sine/copy × Dense..Tricameral           ║")
+	fmt.Println("║   TEST 48 — test41 modes × all layers × xor/sine/copy × Dense..Tricameral × dtypes   ║")
 	fmt.Println("║   StepBP = backprop. Lucy: Acc / SoftAcc / Avail / AdaptPct / Score                 ║")
+	fmt.Println("║   Weight dtype = FormatNone storage; activations stay float32 (cross-numeric).      ║")
 	fmt.Println("╚═════════════════════════════════════════════════════════════════════════════════════╝")
 	fmt.Printf("🧠 layers=%s\n", kindsCSV(kinds))
+	fmt.Printf("🔢 dtypes=%s (%d)\n", dtypesCSV(dtypes), len(dtypes))
 	fmt.Printf("📐 cams=%d..%d  hidden=%d  duration=%s/job  switch=%s  lr=%.3f  alt-times=%d\n",
 		*camMin, *camerals, *hidden, *dur, sw, *lr, *altTimes)
 	fmt.Printf("🧪 tasks=%s  modes=%s\n", *tasksFlag, modesCSV(modes))
@@ -177,18 +190,19 @@ func main() {
 				if rec := recover(); rec != nil {
 					rows[i] = row{
 						Task:  j.task.name,
+						DType: j.dt.String(),
 						Layer: string(j.kind),
 						Arch:  camName(j.nHemi),
 						Mode:  j.mode.String(),
 						Err:   fmt.Sprintf("panic: %v", rec),
 					}
-					fmt.Printf("❌ [%s %s/%s %s] panic: %v\n",
-						j.task.name, j.kind, camName(j.nHemi), j.mode, rec)
+					fmt.Printf("❌ [%s %s %s/%s %s] panic: %v\n",
+						j.task.name, j.dt, j.kind, camName(j.nHemi), j.mode, rec)
 				}
 			}()
 			rows[i] = runLucyJob(j, *hidden, *dur, sw, *lr, *altTimes, *adaptN)
 			r := rows[i]
-			tag := fmt.Sprintf("%s %s/%s %s", r.Task, r.Layer, r.Arch, r.Mode)
+			tag := fmt.Sprintf("%s %s %s/%s %s", r.Task, r.DType, r.Layer, r.Arch, r.Mode)
 			if r.Err != "" {
 				fmt.Printf("❌ [%s] %s\n", tag, r.Err)
 				return
@@ -206,12 +220,13 @@ func main() {
 		"alt_times":     *altTimes,
 		"workers":       *workers,
 		"adapt_windows": *adaptN,
+		"dtypes":        dtypesCSV(dtypes),
 		"score_formula": "Throughput × Availability × SoftAcc / 10000",
 		"rows":          rows,
 	}, "", "  ")
 	_ = os.WriteFile("test48_results.json", data, 0644)
 	fmt.Println("\n✅ Results saved to test48_results.json")
-	printSummary(rows, tasks, modes)
+	printSummary(rows, tasks, dtypes)
 }
 
 func allTest41StackModes() []parallel.TrainMode {
@@ -393,11 +408,12 @@ func runLucyJob(j job, hidden int, dur, switchEvery time.Duration, lr float64, a
 	defer runtime.UnlockOSThread()
 	r := row{
 		Task:  j.task.name,
+		DType: j.dt.String(),
 		Layer: string(j.kind),
 		Arch:  camName(j.nHemi),
 		Mode:  j.mode.String(),
 	}
-	stack, err := buildNativeCameral(j.kind, j.task.in, hidden, j.task.out, j.nHemi, j.mode)
+	stack, err := buildNativeCameral(j.kind, j.task.in, hidden, j.task.out, j.nHemi, j.mode, j.dt)
 	if err != nil {
 		r.Err = err.Error()
 		return r
@@ -585,52 +601,88 @@ func stackWeightBytes(s *parallel.Stack) int64 {
 		if st == nil {
 			continue
 		}
-		f, err := st.FlattenF32()
-		if err != nil || len(f) == 0 {
-			if st.Rows > 0 && st.Cols > 0 {
-				n += int64(st.Rows * st.Cols * 4)
+		elems := int64(st.Rows * st.Cols)
+		if elems <= 0 {
+			f, err := st.FlattenF32()
+			if err != nil || len(f) == 0 {
+				continue
 			}
-			continue
+			elems = int64(len(f))
 		}
-		n += int64(len(f) * 4)
+		bits := int64(st.DType.Bits())
+		if bits <= 0 {
+			bits = 32
+		}
+		n += (elems*bits + 7) / 8
 	}
 	return n
 }
 
-func printSummary(rows []row, tasks []toyTask, modes []parallel.TrainMode) {
+func printSummary(rows []row, tasks []toyTask, dtypes []core.DType) {
 	byTask := map[string][]row{}
 	for _, r := range rows {
 		byTask[r.Task] = append(byTask[r.Task], r)
 	}
 	for _, t := range tasks {
-		rs := byTask[t.name]
-		fmt.Println()
-		fmt.Printf("══ %s  in=%d out=%d  (Acc = hard eval; Soft/Avail/Score = Lucy live) ══\n", t.name, t.in, t.out)
-		fmt.Printf("%-44s │ %6s %6s %6s %6s %7s %8s\n",
-			"layer/arch/mode", "Acc", "Soft", "Avail", "Adapt", "Tput", "Score")
-		sort.Slice(rs, func(i, j int) bool {
-			if rs[i].Score != rs[j].Score {
-				return rs[i].Score > rs[j].Score
+		all := byTask[t.name]
+		dts := dtypes
+		if len(dts) == 0 {
+			dts = dtypesIn(all)
+		}
+		for _, dt := range dts {
+			var rs []row
+			for _, r := range all {
+				if r.DType == dt.String() {
+					rs = append(rs, r)
+				}
 			}
-			return rs[i].Layer+rs[i].Arch+rs[i].Mode < rs[j].Layer+rs[j].Arch+rs[j].Mode
-		})
-		best := -1.0
-		bestName := ""
-		for _, r := range rs {
-			name := fmt.Sprintf("%s/%s/%s", r.Layer, r.Arch, r.Mode)
-			if r.Err != "" {
-				fmt.Printf("%-44s │ ERR %s\n", name, trimErr(r.Err, 40))
+			if len(rs) == 0 {
 				continue
 			}
-			fmt.Printf("%-44s │ %5.1f%% %5.1f%% %5.1f%% %5.1f%% %7.0f %8.0f\n",
-				name, r.Acc, r.Soft, r.Avail, r.Adapt, r.Tput, r.Score)
-			if r.Score > best {
-				best, bestName = r.Score, name
+			fmt.Println()
+			fmt.Printf("══ %s  dtype=%s  in=%d out=%d  (Acc = hard eval; Soft/Avail/Score = Lucy live) ══\n",
+				t.name, dt, t.in, t.out)
+			fmt.Printf("%-52s │ %6s %6s %6s %6s %7s %8s\n",
+				"layer/arch/mode", "Acc", "Soft", "Avail", "Adapt", "Tput", "Score")
+			sort.Slice(rs, func(i, j int) bool {
+				if rs[i].Score != rs[j].Score {
+					return rs[i].Score > rs[j].Score
+				}
+				return rs[i].Layer+rs[i].Arch+rs[i].Mode < rs[j].Layer+rs[j].Arch+rs[j].Mode
+			})
+			best := -1.0
+			bestName := ""
+			for _, r := range rs {
+				name := fmt.Sprintf("%s/%s/%s", r.Layer, r.Arch, r.Mode)
+				if r.Err != "" {
+					fmt.Printf("%-52s │ ERR %s\n", name, trimErr(r.Err, 40))
+					continue
+				}
+				fmt.Printf("%-52s │ %5.1f%% %5.1f%% %5.1f%% %5.1f%% %7.0f %8.0f\n",
+					name, r.Acc, r.Soft, r.Avail, r.Adapt, r.Tput, r.Score)
+				if r.Score > best {
+					best, bestName = r.Score, name
+				}
+			}
+			fmt.Printf("   🏆 Score winner: %s/%s  %.0f\n", dt, bestName, best)
+			printVsBP(rs)
+		}
+	}
+}
+
+func dtypesIn(rs []row) []core.DType {
+	seen := map[string]bool{}
+	var out []core.DType
+	for _, dt := range core.AllDTypes {
+		for _, r := range rs {
+			if r.DType == dt.String() && !seen[r.DType] {
+				seen[r.DType] = true
+				out = append(out, dt)
+				break
 			}
 		}
-		fmt.Printf("   🏆 Score winner: %s  %.0f\n", bestName, best)
-		printVsBP(rs)
 	}
+	return out
 }
 
 func printVsBP(rs []row) {

@@ -1,8 +1,10 @@
-# Test 48 — test41 credit modes × every layer × xor / sine / copy
+# Test 48 — test41 credit modes × every layer × xor / sine / copy × dtypes
 
 Did FastProxy / Sparse beat StepBP on a 10s **sine** sandwich? This is the
 same Lucy board on **every welvet layer kind**, on the toys those sandwiches
-are supposed to fit, through **tricameral**.
+are supposed to fit, through **tricameral**, across **FormatNone weight
+dtypes** (`core.AllDTypes`, 34). Activations stay **float32** (weight dtype ⊥
+act `Tensor[T]`).
 
 Not ARC. Not mesh.
 
@@ -41,31 +43,37 @@ Split-family jobs use `OpenSplitTape` (infer collect **is** the train tape).
 Lucy (same as test41): **Acc**, SoftAcc, Avail = Infer/(Infer+Train), AdaptPct
 (sine switches), Tput, Score = Tput × Avail × SoftAcc / 10_000.
 
-Default `-duration 2s` is the short perm race. For the 10s board:
+Default `-duration 2s` is the short perm race. `-dtypes all` (default) is
+**34×** the old float32 board (~98k jobs if layers/modes/tasks/cams are also
+`all`). Pin storage for the comparable Lucy board:
 
 ```bash
-go run . -duration 10s -switch 2.5s -adapt-windows 10 -workers 1
+go run . -dtypes float32 -duration 10s -switch 2.5s -adapt-windows 10 -workers 1
 ```
 
 `-workers 1` is Lucy-honest (Score/Avail). Default workers = NumCPU finishes
 the full sweep faster but **shares CPU** so Avail/Score drop.
+
+GDN mids have no Store dtype axis (`SetDType` is a no-op there); stem/head
+Dense still convert. SIMD DotTile is **Dense + float32** only — other dtypes
+use CPU tiled so backend is not a hidden axis.
 
 ## Run
 
 ```bash
 cd apps/aai/test48
 
-# dense only, headline modes, 2s
-go run . -layers dense -modes stepbp,tweensplit,headproxy,linear,fastproxy,proxyasync,sparse
+# dense only, headline modes, float32, 2s
+go run . -dtypes float32 -layers dense -modes stepbp,tweensplit,headproxy,linear,fastproxy,proxyasync,sparse
 
-# every layer, 1..3 cameral, all 16 modes (big)
+# every layer, 1..3 cameral, all 16 modes, all 34 dtypes (huge)
 go run . 
 
-# xor + sine, CNN + Dense, Bi/Tri
-go run . -layers dense,cnn1,residual -tasks xor,sine -cam-min 1 -camerals 3 -duration 2s
+# xor + sine, CNN + Dense, Bi/Tri, f32+f16
+go run . -dtypes float32,float16 -layers dense,cnn1,residual -tasks xor,sine -cam-min 1 -camerals 3 -duration 2s
 
-# Lucy-honest 10s (slow)
-go run . -layers dense -modes stepbp,fastproxy,sparse -duration 10s -switch 2.5s -adapt-windows 10 -workers 1
+# Lucy-honest 10s (slow) — pin float32
+go run . -dtypes float32 -layers dense -modes stepbp,fastproxy,sparse -duration 10s -switch 2.5s -adapt-windows 10 -workers 1
 ```
 
 | Flag | Default | Meaning |
@@ -78,6 +86,7 @@ go run . -layers dense -modes stepbp,fastproxy,sparse -duration 10s -switch 2.5s
 | `-switch` | duration/4 | sine frequency switch |
 | `-adapt-windows` | `4` | AdaptPct pulse (10s race: 10) |
 | `-modes` | `all` | 16 test41 stack modes |
+| `-dtypes` | `all` | 34 `core.AllDTypes` (weight storage; act stays f32). Pin `float32` for the old board. |
 | `-tasks` | `xor,sine,copy` | |
 | `-hidden` | `32` | |
 | `-lr` | `0.05` | test41 sine used 0.01; toys need 0.05 |
@@ -86,11 +95,14 @@ go run . -layers dense -modes stepbp,fastproxy,sparse -duration 10s -switch 2.5s
 
 Writes `test48_results.json` (gitignored).
 
-Prints a Score-sorted table per task, then **vs StepBP** deltas for FastProxy /
-Sparse / HeadProxy / Linear.
+Prints a Score-sorted table **per task × dtype**, then **vs StepBP** deltas for
+FastProxy / Sparse / HeadProxy / Linear (matched inside that dtype).
 
 Do not write “we beat backprop” from a 2s XOR lottery. Dense sine at
-`-duration 10s -workers 1` is the comparable board.
+`-dtypes float32 -duration 10s -workers 1` is the comparable board.
+
+The result write-up below is the **float32** 2s / 12-worker sweep (2880 jobs),
+before the dtype axis. Re-run with `-dtypes float32` to reproduce it.
 
 
 
