@@ -18,11 +18,12 @@ import (
 	"github.com/openfluke/welvet/lucy"
 )
 
-// TEST 47 — Tween / StepTween / TweenSplit / StepTweenSplit on normal toys.
+// TEST 47 — Tween / Split / Alt on normal toys.
 //
-// TweenChain is backprop (BackwardStack+SGD). These four are not:
+// TweenChain is backprop (BackwardStack+SGD). These are not:
 //   Tween / StepTween           — broadcast output gap onto every leaf (full gap, half LR)
 //   TweenSplit / StepTweenSplit — same gap, split 1/N across leaves
+//   TweenAlt / StepTweenAlt     — Split then Tween, repeat AltTimes (recompute MSE gap)
 // On a Sandwich, Step* and non-Step share a family (same update). Columns still
 // run as separate jobs so we can see if they match.
 
@@ -72,8 +73,9 @@ func main() {
 	seed := flag.Int64("seed", 1, "rng seed")
 	workers := flag.Int("workers", 0, "concurrent jobs (0 = NumCPU)")
 	tasksFlag := flag.String("tasks", "xor,sine,copy", "xor,sine,copy")
-	modesFlag := flag.String("modes", "steptween,tween,tweensplit,steptweensplit",
-		"steptween,tween,tweensplit,steptweensplit  (add chain for backprop)")
+	modesFlag := flag.String("modes", "steptween,tween,tweensplit,steptweensplit,tweenalt,steptweenalt",
+		"steptween,tween,tweensplit,steptweensplit,tweenalt,steptweenalt  (add chain for backprop)")
+	altTimes := flag.Int("alt-times", 1, "TweenAlt: Split→Tween pairs per TrainStackMSE call")
 	flag.Parse()
 
 	kinds, err := parseLayerList("dense", *layersFlag, flag.Args())
@@ -98,6 +100,9 @@ func main() {
 	if *hidden < 8 {
 		*hidden = 8
 	}
+	if *altTimes < 1 {
+		*altTimes = 1
+	}
 	if *workers <= 0 {
 		*workers = runtime.NumCPU()
 	}
@@ -121,12 +126,12 @@ func main() {
 	}
 
 	fmt.Println("╔═════════════════════════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║   TEST 47 — Tween | StepTween | TweenSplit | StepTweenSplit                         ║")
-	fmt.Println("║   TweenChain = backprop. Split = 1/N credit. Chance on XOR/copy bits ≈ 50%.         ║")
+	fmt.Println("║   TEST 47 — Tween | Split | Alt (Split↔Tween ping-pong)                             ║")
+	fmt.Println("║   TweenChain = backprop. Split = 1/N. AltTimes = Split→Tween pairs per sample.      ║")
 	fmt.Println("╚═════════════════════════════════════════════════════════════════════════════════════╝")
 	fmt.Printf("🧠 layers=%s\n", kindsCSV(kinds))
-	fmt.Printf("📐 cams=%d..%d  hidden=%d  budget=%s/job  lr=%.3f  jobs=%d  workers=%d\n",
-		*camMin, *camerals, *hidden, *budget, *lr, len(jobs), *workers)
+	fmt.Printf("📐 cams=%d..%d  hidden=%d  budget=%s/job  lr=%.3f  alt-times=%d  jobs=%d  workers=%d\n",
+		*camMin, *camerals, *hidden, *budget, *lr, *altTimes, len(jobs), *workers)
 	fmt.Printf("🧪 tasks=%s  modes=%s\n\n", *tasksFlag, modesCSV(modes))
 
 	rows := make([]row, len(jobs))
@@ -138,7 +143,7 @@ func main() {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			rows[i] = runJob(j, *hidden, *budget, *lr)
+			rows[i] = runJob(j, *hidden, *budget, *lr, *altTimes)
 			r := rows[i]
 			tag := fmt.Sprintf("%s %s/%s %s", r.Task, r.Layer, r.Arch, r.Mode)
 			if r.Err != "" {
@@ -156,8 +161,9 @@ func main() {
 	wg.Wait()
 
 	data, _ := json.MarshalIndent(map[string]any{
-		"engine": "welvet-tween-vs-split",
-		"rows":   rows,
+		"engine":    "welvet-tween-vs-split",
+		"alt_times": *altTimes,
+		"rows":      rows,
 	}, "", "  ")
 	_ = os.WriteFile("test47_results.json", data, 0644)
 	fmt.Println("\n✅ Results saved to test47_results.json")
@@ -180,8 +186,12 @@ func parseModes(s string) ([]parallel.TrainMode, error) {
 			m = parallel.ModeStepTweenSplit
 		case "chain", "tweenchain", "steptweenchain", "bp":
 			m = parallel.ModeStepTweenChain
+		case "alt", "tweenalt":
+			m = parallel.ModeTweenAlt
+		case "steptweenalt", "stepalt":
+			m = parallel.ModeStepTweenAlt
 		default:
-			return nil, fmt.Errorf("unknown mode %q (tween|steptween|tweensplit|steptweensplit|chain)", p)
+			return nil, fmt.Errorf("unknown mode %q (tween|steptween|tweensplit|steptweensplit|tweenalt|steptweenalt|chain)", p)
 		}
 		if seen[m] {
 			continue
@@ -276,7 +286,7 @@ func makeCopy(seed int64, dim, nTrain, nEval int) toyTask {
 	return toyTask{name: "copy", in: dim, out: dim, train: train, eval: eval, binary: true}
 }
 
-func runJob(j job, hidden int, budget time.Duration, lr float64) row {
+func runJob(j job, hidden int, budget time.Duration, lr float64, altTimes int) row {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	r := row{
@@ -290,6 +300,7 @@ func runJob(j job, hidden int, budget time.Duration, lr float64) row {
 		r.Err = err.Error()
 		return r
 	}
+	stack.AltTimes = altTimes
 	deadline := time.Now().Add(budget)
 	var last float64
 	for time.Now().Before(deadline) {

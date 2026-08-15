@@ -1,6 +1,6 @@
-# Test 47 — Tween vs StepTween vs TweenSplit vs StepTweenSplit
+# Test 47 — Tween vs Split vs Alt (Split↔Tween ping-pong)
 
-Not ARC. XOR / sine / copy, **every layer kind**, four credit modes:
+Not ARC. XOR / sine / copy, **every layer kind**, six credit modes:
 
 | Mode | Credit |
 |------|--------|
@@ -8,14 +8,19 @@ Not ARC. XOR / sine / copy, **every layer kind**, four credit modes:
 | `Tween` | Same family as StepTween on a Sandwich (same update). |
 | `TweenSplit` | Same gap, **split 1/N** across leaves. |
 | `StepTweenSplit` | Same family as TweenSplit on a Sandwich. |
+| `TweenAlt` | **Split then Tween**, repeat `-alt-times` pairs. Recomputes the MSE gap between phases. |
+| `StepTweenAlt` | Same family as TweenAlt on a Sandwich. |
 
-On Stack/Parallel (no Grid), **Step\* and non-Step collapse to the same family update** — the table still runs them as four jobs so you can see they match. `chain` is actual backprop.
+On Stack/Parallel (no Grid), **Step\* and non-Step collapse to the same family update** — the table still runs them as separate jobs so you can see they match. `chain` is actual backprop.
+
+`TweenAlt` with `-alt-times 3` is Split → Tween → Split → Tween → Split → Tween **per sample**. Default is `1` (one Split, then one Tween).
 
 ```bash
 cd apps/aai/test47
-go run .   # default: steptween,tween,tweensplit,steptweensplit
+go run .   # default: tween / split / alt
 go run . -layers dense,residual,cnn2
-go run . -modes steptween,tween,tweensplit,steptweensplit,chain
+go run . -modes tweenalt,steptweenalt -alt-times 4
+go run . -modes steptween,tween,tweensplit,steptweensplit,tweenalt,steptweenalt,chain
 go run . -budget 3s -camerals 1
 ```
 
@@ -25,7 +30,8 @@ go run . -budget 3s -camerals 1
 | `-camerals` | `2` | 1-cameral .. N |
 | `-budget` | `1.5s` | train wall per job |
 | `-tasks` | `xor,sine,copy` | |
-| `-modes` | `steptween,tween,tweensplit,steptweensplit` | add `chain` for BP |
+| `-modes` | `steptween,tween,tweensplit,steptweensplit,tweenalt,steptweenalt` | add `chain` for BP |
+| `-alt-times` | `1` | Split→Tween pairs per `TrainStackMSE` (TweenAlt only) |
 | `-hidden` | `32` | |
 | `-lr` | `0.05` | |
 
