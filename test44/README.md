@@ -326,10 +326,126 @@ row (SoftAcc never dropped under Lucy’s 10% floor — uninformative).
    residual 0.7s). Integer Score = 0 for all 19.
 
 **Working read:** keep Dense camerals for pixel; use this sweep as a
-negative — **hemisphere *kind* on a 64-d stem is not the ARC lever**. Next
+negative — **hemisphere *kind* on a 64-d stem is not the ARC lever**. Width
+on Dense-like residuals is a different story (`-only 15` below). Next
 deltas that could actually change the encoding: CNN/MHA **on the 30×30
 grid** (no Dense flatten first), a discrete size/color head, or Mix
 `BranchModes`. Not “try cnn3 again at n=20” on the same 902-d sandwich.
+
+---
+
+## 15-cameral layer sweep (`-only 15 -layers all`)
+
+Same protocol, **15 hemispheres** per kind. Wall **6m08s**. COMPARE table
+from the run; Dense-15 was not in this batch — use Dense-5 / Quad / Dense-20
+from the SIMD *n*-sweep as pixel references.
+
+### TLDR
+
+**n=15 does not magically turn CNN/MHA into ARC solvers** (still **0/400**
+exact). It **does** scale the one kind that was already Dense-shaped:
+**residual 15-cameral is the best eval pixel of any test44 run so far**
+(**10.4%** vs Quad **9.3%**, Dense-20 **8.6%**, residual-3 **8.1%**).
+TrainPix **12.7%** ties Quad. Fit **13.5%** is still a hair under Quad’s
+14.3. Residual at n=15 is “Dense twins with a skip,” not a new inductive
+bias — and it **beats Dense-20 on eval** at 691 KiB vs 771 KiB.
+
+Everything expensive got **starved**. MHA 3.5k steps, Mamba 4.2k, SwiGLU
+4.4k at **2431 KiB**, sequential 5.2k. Mamba’s n=3 eval lift (**7.3%**)
+**vanished** (4.2%). CNN1/3, ConvT1/3, GDN, KMeans still glued at Soft
+51.4 / loss 0.24. Lucy “winner” is **mha** with Score **1** only because
+infer took **4.4s** (Avail 8.3%, Tput 14) — worst duty cycle, not best
+mapper.
+
+### n=3 → n=15 (movers vs dead)
+
+| Layer | Fit 3→15 | Train 3→15 | Eval 3→15 | Loss 3→15 | Soft 3→15 | Steps 3→15 |
+|-------|----------|------------|-----------|-----------|-----------|------------|
+| **residual** | 10.0→**13.5** | 9.3→**12.7** | 8.1→**10.4** | 0.125→**0.087** | 70.5→**79.1** | 24.1k→16.6k |
+| metacognition | 7.0→**10.5** | 6.3→**10.0** | 5.2→**8.3** | 0.146→0.112 | 66.3→73.7 | 27.1k→10.8k |
+| layernorm | 6.7→**10.3** | 6.4→8.7 | 5.6→6.9 | 0.025→0.086 | 91.4→89.7 | 37.8k→29.7k |
+| rnn | 7.1→8.1 | 6.8→7.3 | 5.2→5.6 | 0.068→0.077 | 80.2→80.4 | 38.0k→16.6k |
+| cnn2 | 5.9→7.3 | 5.8→6.2 | 4.5→5.0 | 0.240→0.206 | 51.5→56.6 | 14.9k→12.3k |
+| **mamba** | 8.3→**5.2** | 8.4→**5.3** | 7.3→**4.2** | 0.213→0.239 | 55.6→51.5 | 15.1k→**4.2k** |
+| convt2 | 6.6→5.7 | 5.9→5.1 | 4.8→**3.3** | 0.184→0.174 | 60.7→62.5 | 34.1k→20.4k |
+| rmsnorm | 6.4→6.0 | 6.2→4.8 | 4.7→**3.5** | 0.023→0.097 | 91.7→88.7 | 45.7k→43.2k |
+| sequential | 6.5→5.4 | 6.5→5.7 | 5.2→4.3 | 0.213→0.240 | 55.4→51.4 | 26.9k→**5.2k** |
+| swiglu | 5.2→5.3 | — | — | 0.241 | 51.4 | 15.1k→4.4k (**847→2431 KiB**) |
+
+### COMPARE (all 19, 15-cameral)
+
+| Layer | KiB | FitPix | TrainPix | EvalPix | MeanLoss | SoftAcc | AdaptPct | Steps |
+|-------|----:|-------:|---------:|--------:|---------:|--------:|---------:|------:|
+| cnn1 | 451 | 4.8% | 5.1% | 3.8% | 0.241 | 51.4% | 51.4% | 8.1k |
+| cnn2 | 459 | 7.3% | 6.2% | 5.0% | 0.206 | 56.6% | 56.7% | 12.3k |
+| cnn3 | 453 | 4.8% | 5.1% | 3.8% | 0.241 | 51.4% | 51.4% | 6.6k |
+| convt1 | 451 | 4.8% | 5.1% | 3.8% | 0.241 | 51.4% | 51.4% | 29.3k |
+| convt2 | 459 | 5.7% | 5.1% | 3.3% | 0.174 | 62.5% | 62.6% | 20.4k |
+| convt3 | 453 | 4.8% | 5.1% | 3.8% | 0.241 | 51.4% | 51.4% | 22.0k |
+| mha | 466 | 5.4% | 5.3% | 4.6% | 0.241 | 51.4% | 51.4% | **3.5k** |
+| lstm | 485 | 5.8% | 5.4% | 4.4% | 0.227 | 53.0% | 53.0% | 7.7k |
+| rnn | 459 | 8.1% | 7.3% | 5.6% | 0.077 | 80.4% | 80.3% | 16.6k |
+| mamba | 474 | 5.2% | 5.3% | 4.2% | 0.239 | 51.5% | 51.6% | 4.2k |
+| gdn | 451 | 5.4% | 5.2% | 4.2% | 0.240 | 51.4% | 51.4% | 13.5k |
+| swiglu | **2431** | 5.3% | 5.1% | 4.3% | 0.241 | 51.4% | 51.4% | 4.4k |
+| **residual** | 691 | **13.5%** | **12.7%** | **10.4%** | **0.087** | 79.1% | 79.2% | 16.6k |
+| sequential | 931 | 5.4% | 5.7% | 4.3% | 0.240 | 51.4% | 51.5% | 5.2k |
+| softmax | 451 | 5.8% | 5.4% | 4.7% | 0.212 | 54.5% | 54.5% | 30.2k |
+| layernorm | 458 | 10.3% | 8.7% | 6.9% | 0.086 | **89.7%** | **89.8%** | 29.7k |
+| rmsnorm | 455 | 6.0% | 4.8% | 3.5% | 0.097 | 88.7% | 88.7% | 43.2k |
+| kmeans | 691 | 5.4% | 5.3% | 4.5% | 0.240 | 51.4% | 51.5% | 15.3k |
+| metacognition | 691 | 10.5% | 10.0% | 8.3% | 0.112 | 73.7% | 73.8% | 10.8k |
+| *Dense-5 (prior)* | *531* | *13.2%* | *11.8%* | *8.4%* | *0.094* | *78.4%* | *78.4%* | *64.4k* |
+| *Quad (prior)* | *515* | *14.3%* | *12.9%* | *9.3%* | *0.103* | *76.6%* | *76.6%* | *67.6k* |
+| *Dense-20 (prior)* | *771* | *13.9%* | *12.0%* | *8.6%* | *0.052* | *87.2%* | *87.5%* | *60.1k* |
+
+Official ARC: **0 exact / 0 solved** on every row. Consistency 100%.
+
+### Observations
+
+1. **Residual width is the Dense-cameral story again.** 3→15: Fit +3.5,
+   Train +3.4, Eval **+2.3**, loss 0.125→0.087, Soft 70→79, at the usual
+   step tax (24k→17k). Eval **10.4%** is the first time a non-Dense-twin
+   sandwich beats Quad/Dense-20 on *transfer pixel*. Still not a solve.
+   691 KiB sits between Dense-5 (531) and Dense-20 (771).
+
+2. **Metacognition tracks residual** (it wraps a Dense) but starved
+   harder (10.8k steps). 10.5 / 10.0 / 8.3 ≈ Dense-5 pixel, t50 **97s**
+   (late). Heuristic wrapper + 15 copies is extra cost, not extra ARC.
+
+3. **LayerNorm n=15 started mapping cells** (Fit 6.7→10.3) while SoftAcc
+   stayed ~90 and **loss got worse** (0.025→0.086). The n=3 “91% Soft /
+   6% pix” cheat loosened: more parallel γ/β actually moved rounded
+   colors. RMSNorm did the opposite (Eval 4.7→3.5, loss 0.023→0.097) —
+   do not treat the two norms as interchangeable.
+
+4. **RNN plateaued.** Soft stayed ~80, pixel +1, loss slightly worse,
+   steps halved. Cheap recurrence saturates; more RNNs ≠ more structure.
+   LSTM still dead-ish (7.7k steps).
+
+5. **Mamba / sequential / SwiGLU / MHA hit the 100-cameral cliff** at
+   n=15 because each hemi is fat. Mamba lost its only interesting column.
+   SwiGLU **2.4 MiB** for 5.3% Fit is the RAM punchline. Sequential
+   (two Dense per hemi × 15) collapsed back to the 51.4% Soft basin.
+
+6. **CNN2 nudged** (5.9→7.3 Fit, loss 0.24→0.21, Soft 51→57). CNN1/3 did
+   not (still ~4–5 ticks/item). Tiny convs on a 64-d view still aren’t
+   vision; extra width only helps the 2d layout a little.
+
+7. **ConvT2 pixel went down** (Eval 4.8→3.3) even though loss improved
+   slightly. More transpose-conv copies overfit the continuous canvas
+   and hurt discrete cells — same SoftAcc-vs-pixel split as Dense-100.
+
+8. **Score “winner” mha is Availability theater.** Infer 4.4s / train
+   48s → Avail 8.3% → integer Score 1. Soft 51.4, pix ~5%, **3.5k steps**.
+   cnn1/cnn3 also look “available” (infer 4–5s). Rank pixel, not Score.
+
+**Working read:** *n* still only helps **Dense-like** hemispheres
+(residual, a bit of metacognition / layernorm). Fat kinds die at 15 the
+way Dense twins died at 100. Residual-15’s eval edge over Quad is the
+one positive delta in this file that is not a SoftAcc illusion — and it
+is still a 10% color canvas, **0 ARC solves**. Next: grid-native CNN/MHA,
+not n=50 residual.
 
 ---
 
