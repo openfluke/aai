@@ -32,7 +32,7 @@ Opt-in Split variants (not in `-modes all`). Works on every sandwich Op (Dense, 
 | `headproxy` | TweenSplitHeadProxy | Head: full \(g_y\) + \(J_{\mathrm{head}}^\top\). Hidden: \(\frac{1}{N-1}P(g_{\mathrm{proxy}})\) **`dW` only**. One tape. |
 | `linear` | TweenSplitLinear | \(g_i=\frac{1}{N}P(\tilde W_i^\top g_y)\). One SIMD \(W^\top\) walk, never \(W\times W\). One tape. |
 | `fastproxy` | TweenSplitFastProxy | \(g_{\mathrm{proxy}}=W_{\mathrm{head}}^\top g_y\) (no act′). All leaves `dW`-only. No head-backward lock. |
-| `linearcache` | TweenSplitLinearCache | Same math as Linear; refresh the per-leaf direction every 20 steps, scale by \(\\|g_y\\|\) in between. |
+| `linearcache` | TweenSplitLinearCache | **Dead** — cached \(\tilde W\) direction. Dense 14%→0 after 6s. Same class as TweenTrace. |
 | `proxyasync` | TweenSplitHeadProxyAsync | Hidden use proxy from sample \(T-1\); head computes \(T\). Seed on first sample. Not EMA. |
 | `sparse` | TweenSplitSparse | Head + one rotating hidden leaf per sample. Acc risk, real FLOP cut. |
 
