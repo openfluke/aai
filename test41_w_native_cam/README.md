@@ -25,6 +25,8 @@ MobileScore). Full dtype×quant matrix → [`test41_w_native_cam_perm`](../test4
 
 Split / Alt train via `TrainStackMSE` (Grid `tween.State` has no Split/Alt). BP/Tween uniform jobs stay on the Grid loop so the historical board is comparable. `-alt-times` sets Split→Tween pairs for TweenAlt.
 
+**Dropped:** TweenHead (full MSE on last leaf, \(P(g)/\sqrt{H}\) on hidden). 10s sine: Dense Acc 41 vs Split 31, Bicameral died at 13% flat, Tri/Quad ≈ Split, still far from StepBP ~74%. Equation did not hold.
+
 ### Mix — distinct-mode permutations on Bi / Tri / Quad
 
 Uniform Bi/Tri/Quad stay as-is (same mode on every hemi).
