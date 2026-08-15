@@ -93,55 +93,50 @@ tests and on eval.
 
 ## What adding camerals actually does
 
-Snapshot from the first full ARC-AGI-1 run
-(`-item-time 125ms -passes 1 -hidden 64`, StepTweenChain, SIMD, ~2m45s wall
-with 5 nets in parallel):
+Snapshot, same protocol (`-item-time 125ms -passes 1 -hidden 64`, StepTweenChain,
+SIMD, ~2m45–2m50s wall). Dense–5 ran together; 20 and 100 were `-only N`.
 
 | Arch | KiB | FitPix | TrainPix | EvalPix | MeanLoss | SoftAcc | AdaptPct | Steps |
 |------|----:|-------:|---------:|--------:|---------:|--------:|---------:|------:|
-| Dense | 467 | 11.6% | 10.4% | 8.3% | 0.148 | 67.4% | 67.5% | 76.7k |
+| Dense (1 mid) | 467 | 11.6% | 10.4% | 8.3% | 0.148 | 67.4% | 67.5% | 76.7k |
 | Bicameral | 483 | 13.6% | 12.4% | 8.9% | 0.111 | 74.8% | 74.8% | 75.3k |
 | Tricameral | 499 | 12.3% | 10.8% | 8.0% | 0.111 | 74.9% | 74.9% | 71.2k |
 | Quadcameral | 515 | **14.3%** | **12.9%** | **9.3%** | 0.103 | 76.6% | 76.6% | 67.6k |
 | 5-cameral | 531 | 13.2% | 11.8% | 8.4% | 0.094 | 78.4% | 78.4% | 64.4k |
-| **20-cameral** (`-only 20`) | 771 | 13.9% | 12.0% | 8.6% | **0.052** | **87.2%** | **87.5%** | 60.1k |
+| 20-cameral | 771 | 13.9% | 12.0% | 8.6% | **0.052** | **87.2%** | **87.5%** | 60.1k |
+| **100-cameral** | 2051 | 3.9% | 3.4% | 2.2% | 0.075 | 82.1% | 82.2% | **17.9k** |
 
 **Official ARC solves: 0/400 train, 0/400 eval, every arch.** A padded Dense
 mapper is not a program synthesizer. Pixel/SoftAcc are the live signal.
 
 ### What *does* move with *n*
 
-1. **SoftAcc climbs with hemisphere count** (67% → 78% → **87% at 20**).
-   Lucy color-vector score after each demo’s 125ms pulse. Each extra cameral
-   is another parallel path through the same stem, add-merged — more
-   independent fits of the *current* grid, not a deeper stack. AdaptPct
-   tracks SoftAcc because the “switch” is the next ARC file, not a sine
-   frequency shock. On the 20-cameral pass the rolling SoftAcc itself
-   climbed through the epoch (~52% at demo 100 → ~97% by demo 1300): the
-   same net is getting better at slamming each new pair in 125ms as it
-   walks the set.
+1. **SoftAcc climbs into the 20s, then slips at 100** (67% → 78% → **87% at
+   20** → 82% at 100). Each extra cameral is another parallel path through
+   the same stem, add-merged. AdaptPct tracks SoftAcc (switch = next ARC
+   file). On the 20-cameral pass rolling SoftAcc went ~52% → ~97% through
+   the epoch. 100-cameral still sits above Dense/5 but **loses to 20**.
 
-2. **Train MSE falls with *n*** (0.148 → 0.094 → **0.052 at 20**). More
-   hemispheres in the merge, each updated on its own branch. Still not
-   “solved the task” — one 902-d pair at a time. 20-cameral roughly **halved
-   5-cameral’s mean loss** while FitPix only moved 13.2% → 13.9%.
+2. **Train MSE bottoms at 20, not 100** (0.148 → 0.094 → **0.052 at 20** →
+   0.075 at 100). 20-cameral halved 5-cameral’s loss; 100-cameral gave some
+   of that back. More brains only help while the 125ms budget still buys
+   enough SGD ticks.
 
-3. **Pixel is weakly better than Dense, not strictly monotonic.** Quad
-   still holds **best Fit/Train/Eval pixel** (14.3 / 12.9 / 9.3). 20-cameral
-   (13.9 / 12.0 / 8.6) sits next to 5-cameral, **below Quad**. Extra
-   viewpoints keep buying SoftAcc/loss; rounded 0–9 cells do not keep
-   pace. *n* brains ≠ *n*× ARC, and ≠ stacking another sequential layer.
+3. **Hard pixel peaks at Quad, dies at 100.** Quad still holds best
+   Fit/Train/Eval pixel (14.3 / 12.9 / 9.3). 20-cameral (13.9 / 12.0 / 8.6)
+   did not beat it. **100-cameral collapsed to 3.9 / 3.4 / 2.2** — worse
+   than Dense — and **never hit t50** (t50=0). SoftAcc can stay ~82% while
+   rounded 0–9 cells fall apart.
 
-4. **Steps per wall-second fall as *n* grows** (76.7k → 64.4k → **60.1k**
-   at 20; ~50 SGD ticks per 125ms vs Dense ~59). Each `TrainStackMSE` runs
-   *n* Dense GEMVs in the hemi. 20-cameral still finished in **~2m45s**
-   (same `item-time` cadence) but each tick is heavier: 771 KiB vs Dense
-   467. SoftAcc is not free.
+4. **Steps collapse with *n*** (76.7k → 60.1k at 20 → **17.9k at 100**,
+   ~14 ticks per 125ms vs ~46 at 20 vs ~59 at Dense). Each tick is *n*
+   Dense GEMVs. Wall time stays ~2m50s (`item-time` cadence) but 100-cameral
+   is **starved of updates**: 2.0 MiB, infer 1.3s vs 20-cameral’s 0.42s.
+   Avail ticked up to 0.8% only because infer got slower, not because we
+   served more.
 
-5. **Eval pixel stays below train pixel** (~2–4 points) on every arch,
-   including 20-cameral (12.0 train / 8.6 eval). Zero-shot eval is a
-   different set of transformations. Twenty hemispheres did not close that
-   gap.
+5. **Eval stays below train** on every arch. 100-cameral did not close it
+   (3.4 train / 2.2 eval); it just made both worse.
 
 ### 20-cameral pulse (same protocol, `-only 20`)
 
@@ -152,6 +147,19 @@ designed: the merge can hug the continuous `c/9` canvas after a task
 switch; discrete grids still miss. Official solves stayed **0/400 + 0/400**.
 Lucy Score still prints 0 (Avail ~0.3%, train 161s vs infer 0.4s). Stab
 rose a bit (80% → 84%). Acc/s 0.528 vs 5-cameral 0.475.
+
+### 100-cameral (`-only 100`) — past the cliff
+
+Same 125ms/demo, ~2m50s. Weights **2051 KiB**. Steps **17.9k** (~14/item).
+Fit/Train/Eval pixel **3.9 / 3.4 / 2.2**. SoftAcc 82.1 / Adapt 82.2 — still
+“high” on scale 1.0 colors, but **below 20-cameral**, and mean loss **0.075**
+is worse than 20’s 0.052. t25≈5.9s, **t50 never**. Infer 1.3s (heavier
+forward) vs train 164s.
+
+This is the 125ms budget **losing to Parallel width**: 100 add-merged Dense
+twins cost so much per tick that the net cannot finish adapting a tile
+before the next one arrives. More camerals stopped being more cognition
+and became fewer updates.
 
 ### What did *not* move
 
@@ -191,12 +199,12 @@ rose a bit (80% → 84%). Acc/s 0.528 vs 5-cameral 0.475.
 | Score / MobileScore (int) | Availability starved by 125ms-train / 1-forward |
 | Throughput | Same demo cadence (`1 / item-time`) for every arch |
 
-**Working read:** Dense → 5 → **20** adds **parallel hemispheres at one
-depth**, not layers. SoftAcc/loss keep moving with *n* (20-cameral 87% /
-0.052); **hard pixel peaked at Quad** and 20-cameral did not beat it.
-Exact ARC solves did not appear. Next structural delta is heterogeneous
-hemispheres (`-layer` / `HemispheresFrom`) or Mix `BranchModes`, not a
-deeper Sequential and not blindly scaling *n* for pixel.
+**Working read:** Dense → Quad → 20 → 100 is **width at one depth**, not
+layers. SoftAcc/loss **peak around 20**; **hard pixel peaks at Quad**;
+**100-cameral is a regression** (pixel worse than Dense, fewer steps, 2 MiB).
+Exact ARC solves did not appear at any *n*. Next delta is heterogeneous
+hemispheres (`-layer` / `HemispheresFrom`) or Mix `BranchModes` — not
+`n=100` on the same Dense twins.
 
 ---
 
