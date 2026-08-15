@@ -23,6 +23,9 @@ const (
 	KindCNN1          CellKind = "cnn1"
 	KindCNN2          CellKind = "cnn2"
 	KindCNN3          CellKind = "cnn3"
+	KindConvT1        CellKind = "convt1"
+	KindConvT2        CellKind = "convt2"
+	KindConvT3        CellKind = "convt3"
 	KindMHA           CellKind = "mha"
 	KindRNN           CellKind = "rnn"
 	KindLSTM          CellKind = "lstm"
@@ -42,12 +45,15 @@ const (
 func parseCellKind(s string) (CellKind, error) {
 	k := CellKind(strings.ToLower(strings.TrimSpace(s)))
 	switch k {
-	case KindDense, KindCNN1, KindCNN2, KindCNN3, KindMHA, KindRNN, KindLSTM,
-		KindMamba, KindGDN, KindSwiGLU, KindResidual, KindSequential, KindSoftmax,
-		KindLayerNorm, KindRMSNorm, KindEmbedding, KindKMeans, KindMetacognition:
+	case "cnn":
+		return KindCNN1, nil
+	case KindDense, KindCNN1, KindCNN2, KindCNN3, KindConvT1, KindConvT2, KindConvT3,
+		KindMHA, KindRNN, KindLSTM, KindMamba, KindGDN, KindSwiGLU, KindResidual,
+		KindSequential, KindSoftmax, KindLayerNorm, KindRMSNorm, KindEmbedding,
+		KindKMeans, KindMetacognition:
 		return k, nil
 	default:
-		return "", fmt.Errorf("unknown layer %q (dense now; others reserved)", s)
+		return "", fmt.Errorf("unknown layer %q", s)
 	}
 }
 
@@ -67,12 +73,9 @@ func camName(nHemi int) string {
 }
 
 // buildNativeCameral is Dense(in→hidden) → native Hemispheres(n, add) → Dense(hidden→out).
-// nHemi≤1 is a Dense sandwich (no Parallel) so the baseline shares stem/head geometry.
-// Future kinds go through HemispheresFrom once branch builders exist.
+// Stem/head stay Dense so ARC stays a 902-d vector. Hemispheres are `kind`
+// (View-wrapped when the Op wants spatial/seq rank). nHemi≤1 is one mid Op.
 func buildNativeCameral(kind CellKind, in, hidden, out, nHemi int, mode parallel.TrainMode) (*parallel.Stack, error) {
-	if kind != KindDense {
-		return nil, fmt.Errorf("test44: layer %q not wired yet — dense only for now (HemispheresFrom is ready)", kind)
-	}
 	if in <= 0 || hidden <= 0 || out <= 0 {
 		return nil, fmt.Errorf("test44: need positive in/hidden/out")
 	}
@@ -84,25 +87,24 @@ func buildNativeCameral(kind CellKind, in, hidden, out, nHemi int, mode parallel
 
 	var mid any
 	if nHemi <= 1 {
-		mid, err = dense.NewConfigured[float32](hidden, hidden, core.ActivationLeakyReLU,
-			core.DTypeFloat32, quant.FormatNone, xavier(hidden, hidden))
+		mid, err = newHemisphereOp(kind, hidden)
 		if err != nil {
-			return nil, fmt.Errorf("dense mid: %w", err)
+			return nil, fmt.Errorf("mid %s: %w", kind, err)
 		}
 	} else {
-		hemi, herr := parallel.Hemispheres(hidden, hidden, nHemi, parallel.CombineAdd,
-			core.ActivationLeakyReLU, core.DTypeFloat32, quant.FormatNone)
+		branches := make([]any, nHemi)
+		for i := 0; i < nHemi; i++ {
+			op, herr := newHemisphereOp(kind, hidden)
+			if herr != nil {
+				return nil, fmt.Errorf("hemisphere %d %s: %w", i, kind, herr)
+			}
+			branches[i] = op
+		}
+		hemi, herr := parallel.HemispheresFrom(parallel.Config{
+			Dim: hidden, OutFeat: hidden, Branches: nHemi, Combine: parallel.CombineAdd,
+		}, branches, nil)
 		if herr != nil {
 			return nil, fmt.Errorf("hemispheres n=%d: %w", nHemi, herr)
-		}
-		for i := 0; i < nHemi; i++ {
-			br, ok := hemi.DenseBranch(i)
-			if !ok || br == nil || br.Weights == nil {
-				return nil, fmt.Errorf("hemisphere %d not Dense", i)
-			}
-			if err := br.Weights.SetFromF32(xavier(hidden, hidden)); err != nil {
-				return nil, fmt.Errorf("hemisphere %d init: %w", i, err)
-			}
 		}
 		modes := make([]parallel.TrainMode, nHemi)
 		for i := range modes {
@@ -122,7 +124,11 @@ func buildNativeCameral(kind CellKind, in, hidden, out, nHemi int, mode parallel
 	if err != nil {
 		return nil, err
 	}
-	s.Exec.Backend = core.BackendSIMD
+	// Dense hemispheres use SIMD DotTile (FormatNone f32). Other Ops train on CPU tiled.
+	s.Exec.Backend = core.BackendCPUTiled
+	if kind == KindDense {
+		s.Exec.Backend = core.BackendSIMD
+	}
 	s.Exec.MultiCore = true
 	s.Exec.TileSize = 32
 	s.SyncChildExec()

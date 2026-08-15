@@ -15,12 +15,15 @@ same SoftAcc / AdaptPct / Availability / Score / MobileScore formulas as
 Default: **StepTweenChain**, Dense cells, SIMD, **125ms per demo**, one pass
 over all 1302 ARC-AGI-1 training demos, then score 400 train tests + 400 eval
 tests. Sweeps Dense + bi / tri / quad / 5-cameral (`go run .`). One *n*-cameral
-only: `go run . -only N`.
+only: `go run . -only N`. Hemisphere kind sweep (no Dense): leftover args or
+`-layers`.
 
 ```bash
 cd apps/aai/test44
 go run .                          # Dense + bi..5-cameral, all tiles
-go run . -only 20                 # just 20-cameral (not 2..20)
+go run . -only 20                 # just 20-cameral Dense (not 2..20)
+go run . -only 3 cnn cnn2 cnn3 mha lstm
+go run . -only 3 -layers all      # every kind except Dense, tricameral each
 go run . -n 20 -item-time 50ms    # short smoke
 go run . -set agi2 -camerals 5
 ```
@@ -33,7 +36,8 @@ go run . -set agi2 -camerals 5
 | `-only` | `0` | exactly N hemispheres — no Dense, no sweep |
 | `-item-time` | `125ms` | TrainStackMSE budget per demo |
 | `-passes` | `1` | cycles over the demo set |
-| `-layer` | `dense` | stem/hemis/head kind (`cnn2`/`mha`/… reserved) |
+| `-layer` | `dense` | single kind when `-layers` / args are empty |
+| `-layers` | empty | comma/space list, or `all` (every kind except dense). leftover args also count (`cnn cnn2 mha…`) |
 | `-hidden` | `64` | hidden width |
 | `-workers` | NumCPU | concurrent cameral nets |
 | `-set` | `agi1` | `agi1` \| `agi2` |
@@ -59,11 +63,12 @@ Mix). Forward is *n* independent views of the stem, then `CombineAdd` (or
 avg / concat / MoE gate). That is a split-cognition merge, not `L → L+1`
 in a Sequential.
 
-RAM still grows ~`H×H` per extra hemi at `H=64` (Dense 467 KiB → 5-cameral
-531 KiB) because this run used Dense twins. The *topology* is parallel, not
-“one more Dense in the stack.” Later `-layer cnn2` / `mha` / … swaps the
-*kind* of each hemisphere via `HemispheresFrom`; *n* is still how many
-brains sit side by side.
+RAM still grows per extra hemi. Stem/head stay Dense `902↔H` adapters so the
+ARC vector encoding does not change. `-layers cnn2` / `mha` / `lstm` / … swaps
+the *kind* of each hemisphere via `HemispheresFrom` (spatial/seq Ops get a
+zero-weight `View` reshape around the hidden vector). *n* is still how many
+brains sit side by side. End of a multi-layer run: one ARC+Lucy table **per
+layer**, then a **COMPARE all layers** table with the same columns.
 
 ---
 
@@ -164,9 +169,9 @@ and became fewer updates.
 ### What did *not* move
 
 - **Exact grids / TrainSolve / EvalSolve** — still zero. Adding camerals
-  does not invent objectness, counting, or crop-to-size. Until CNN/MHA
-  (or a size head that is actually used as a discrete program) land, this
-  is a continuous interpolator on a 30×30 canvas.
+  does not invent objectness, counting, or crop-to-size. CNN/MHA/LSTM as
+  *hemispheres on the 64-d stem* (below) did not change that. This is still
+  a continuous interpolator on a 30×30 canvas.
 - **Lucy Score and MobileScore printed as 0.** Score =
   `Throughput × Availability × SoftAcc / 10_000`. Availability is
   `InferMs / (InferMs+TrainMs)` ≈ **0.2%** because we spend 125ms training
@@ -202,9 +207,129 @@ and became fewer updates.
 **Working read:** Dense → Quad → 20 → 100 is **width at one depth**, not
 layers. SoftAcc/loss **peak around 20**; **hard pixel peaks at Quad**;
 **100-cameral is a regression** (pixel worse than Dense, fewer steps, 2 MiB).
-Exact ARC solves did not appear at any *n*. Next delta is heterogeneous
-hemispheres (`-layer` / `HemispheresFrom`) or Mix `BranchModes` — not
-`n=100` on the same Dense twins.
+Exact ARC solves did not appear at any *n*. Heterogeneous hemispheres
+(`-layers all`) ran next — they did **not** beat Dense twins on pixel.
+
+---
+
+## Tricameral layer sweep (`-only 3 -layers all`)
+
+Same protocol as the Dense *n*-sweep: **125ms/demo**, one pass, H=64,
+StepTweenChain, ARC-AGI-1 1302 demos → 400 train tests + 400 eval.
+`go run . -only 3 -layers all` — **19 nets**, 12 workers, wall **5m44s**.
+Stem/head stay Dense `902↔64`; only the three parallel hemispheres change
+kind. Spatial/seq Ops see a `View` of that hidden vector (e.g. CNN2
+`4×4×4`, MHA/LSTM `8×8`), **not** the raw 30×30 grid.
+
+Dense tricameral from the earlier SIMD sweep is the reference (not re-run
+in this batch): Fit/Train/Eval **12.3 / 10.8 / 8.0**, loss 0.111, Soft 74.9%,
+71.2k steps, 499 KiB.
+
+### TLDR
+
+**Swapping the hemisphere Op did not beat Dense camerals, and did not
+solve a single ARC task.** Official solves stayed **0/400 + 0/400**. Best
+hard pixel in this sweep is **residual** (10.0 / 9.3 / 8.1) — still under
+Dense tri and well under Quad. Residual *is* Dense `F(x)+x`, so the
+winner among “other layers” is the one closest to Dense.
+
+Two traps in the Lucy columns:
+
+1. **LayerNorm / RMSNorm look like champions** (SoftAcc **91%**, loss
+   **0.023–0.025**) while FitPix is only **~6.5%**. Norms pull the 64-d
+   vector toward a stable mean; `c/9` SoftAcc loves that. Rounded 0–9
+   cells do not. Do not rank this sweep on SoftAcc alone.
+2. **Lucy Score / MobileScore still print 0** (Avail 0.6–5.7%). The
+   COMPARE “winner” is `cnn1` only because every Score integer-floors to
+   0 and cnn1 is first. Rank **pixel / loss / steps**, not Score.
+
+Dead cluster stuck at Soft **~51.4%**, loss **~0.240**, FitPix **~5%**
+(cnn1, cnn3, convt1, convt3, mha, gdn, swiglu, kmeans, softmax): they
+barely left the first-100-demo plateau. CNN1/CNN3 only got **~4 SGD ticks
+per 125ms** (5.5k / 5.3k steps vs softmax 46k). MHA was also thin (10.8k).
+This is the same 125ms-vs-width cliff as 100-cameral, now as **expensive
+Ops** instead of 100 Dense twins.
+
+What actually moved a little: **RNN** (loss 0.068, Soft 80%, pix 7.1) —
+best continuous fit of a real mixer; **Mamba** best eval pixel among
+exotics (**7.3%**); **ConvT2** trained (loss 0.184, Soft 61%) while
+ConvT1/3 did not; **metacognition** tracked residual at a discount
+(7.0 / 6.3 / 5.2). None of that is an ARC program. The 30×30 grid is
+still crushed through a Dense stem before the fancy hemisphere ever sees
+it.
+
+### COMPARE (all 19, tricameral)
+
+| Layer | KiB | FitPix | TrainPix | EvalPix | MeanLoss | SoftAcc | AdaptPct | Steps |
+|-------|----:|-------:|---------:|--------:|---------:|--------:|---------:|------:|
+| cnn1 | 451 | 4.8% | 5.1% | 3.8% | 0.241 | 51.4% | 51.4% | 5.6k |
+| cnn2 | 453 | 5.9% | 5.8% | 4.5% | 0.240 | 51.5% | 51.5% | 14.9k |
+| cnn3 | 451 | 4.8% | 5.1% | 3.8% | 0.241 | 51.4% | 51.4% | 5.3k |
+| convt1 | 451 | 4.8% | 5.1% | 3.8% | 0.241 | 51.4% | 51.4% | 38.7k |
+| convt2 | 453 | 6.6% | 5.9% | 4.8% | 0.184 | 60.7% | 60.8% | 34.1k |
+| convt3 | 451 | 4.8% | 5.1% | 3.8% | 0.241 | 51.4% | 51.4% | 35.7k |
+| mha | 454 | 5.1% | 5.2% | 4.0% | 0.240 | 51.4% | 51.4% | 10.8k |
+| lstm | 458 | 6.6% | 5.3% | 4.4% | 0.221 | 53.7% | 53.6% | 21.9k |
+| **rnn** | 453 | 7.1% | 6.8% | 5.2% | **0.068** | 80.2% | 80.2% | 38.0k |
+| mamba | 456 | 8.3% | **8.4%** | **7.3%** | 0.213 | 55.6% | 55.7% | 15.1k |
+| gdn | 451 | 5.2% | 5.5% | 4.2% | 0.240 | 51.4% | 51.4% | 34.7k |
+| swiglu | 847 | 5.2% | 5.4% | 4.5% | 0.241 | 51.4% | 51.4% | 15.1k |
+| **residual** | 499 | **10.0%** | **9.3%** | **8.1%** | 0.125 | 70.5% | 70.7% | 24.1k |
+| sequential | 547 | 6.5% | 6.5% | 5.2% | 0.213 | 55.4% | 55.5% | 26.9k |
+| softmax | 451 | 5.5% | 5.1% | 4.5% | 0.238 | 51.6% | 51.6% | 45.8k |
+| layernorm | 452 | 6.7% | 6.4% | 5.6% | **0.025** | **91.4%** | **91.4%** | 37.8k |
+| rmsnorm | 452 | 6.4% | 6.2% | 4.7% | **0.023** | **91.7%** | **91.7%** | 45.7k |
+| kmeans | 499 | 5.4% | 5.4% | 4.4% | 0.240 | 51.4% | 51.4% | 33.0k |
+| metacognition | 499 | 7.0% | 6.3% | 5.2% | 0.146 | 66.3% | 66.4% | 27.1k |
+| *Dense tri (prior run)* | 499 | *12.3%* | *10.8%* | *8.0%* | *0.111* | *74.9%* | *74.9%* | *71.2k* |
+
+Official ARC: **0 exact / 0 solved** on every row. Consistency 100% on every
+row (SoftAcc never dropped under Lucy’s 10% floor — uninformative).
+
+### Observations
+
+1. **Kind ≠ vision on the grid.** CNN/MHA never saw 30×30. They mixed a
+   Dense stem’s 64-d code. A “CNN cameral” here is not a convnet ARC
+   solver; it is three tiny convs on a reshaped hidden. That is why cnn1
+   and Dense-quad are not comparable as “CNN vs Dense.”
+
+2. **Steps are the hidden axis.** cnn1/cnn3 ~4 ticks/item; rmsnorm/softmax
+   ~35. Same 125ms. Ops that im2col or attn a 64-d view still cost enough
+   that the net never leaves the ~0.24 MSE basin. ConvT1 got 38k steps and
+   *still* sat at 0.241 — width isn’t the only failure; some Ops just
+   don’t move this encoding.
+
+3. **Residual ≈ Dense with a skip.** 499 KiB (same as Dense tri), pixel
+   closest to the Dense reference, Soft 70.5 vs Dense 74.9. The skip helps
+   train (loss 0.125) but does not invent structure. Sequential (two Dense
+   in the hemi) was worse pixel than residual and slower to fit.
+
+4. **RNN vs LSTM.** Vanilla RNN (38k steps, loss 0.068, Soft 80) beat LSTM
+   (22k, 0.221, 53.7) on every useful column. LSTM is heavier per tick on
+   seq=8, d=8; the budget prefers the cheap recurrence. Pixel still 7%.
+
+5. **Mamba** is the only exotic with EvalPix **7.3%** (train 8.4, fit 8.3)
+   — small lift over the dead cluster, still below residual and Dense.
+   GDN looked like the dead cluster despite 35k steps (linear-attn on
+   seq=8 is not ARC).
+
+6. **SwiGLU** was the RAM hog (847 KiB) and still dead metrics. Extra FFN
+   width in the hemi does not help a 902-d color canvas.
+
+7. **Softmax / KMeans / GDN / MHA** as hemispheres are close to a no-op
+   on this protocol: SoftAcc glued to 51.4% (the “always ~0.5” color
+   guess). MHA with seq=8, d=8, 4 heads is a toy attention, not a
+   transformer on the grid.
+
+8. **Lucy Score ranking is noise.** Avail 0.6–5.7% (cnn1/cnn3 look
+   “available” only because they were *slow to infer*, 2.1–2.3s infer vs
+   residual 0.7s). Integer Score = 0 for all 19.
+
+**Working read:** keep Dense camerals for pixel; use this sweep as a
+negative — **hemisphere *kind* on a 64-d stem is not the ARC lever**. Next
+deltas that could actually change the encoding: CNN/MHA **on the 30×30
+grid** (no Dense flatten first), a discrete size/color head, or Mix
+`BranchModes`. Not “try cnn3 again at n=20” on the same 902-d sandwich.
 
 ---
 

@@ -21,14 +21,15 @@ import (
 
 // TEST 44 — ARC-AGI native camerals (welvet v0.95.1)
 //
-// One Sandwich net per arch (Dense + Hemispheres 2..camerals). Cycle every
-// training-split demo pair for -item-time (default 125ms) of StepTweenChain,
-// pulse-infer after each item (Lucy/tide metrics), then score training-task
-// test grids and the evaluation split. Dense now; -layer reserved.
+// One Sandwich net per (layer, hemisphere-count). Cycle every training-split
+// demo pair for -item-time (default 125ms) of StepTweenChain, pulse-infer after
+// each item (Lucy/tide metrics), then score training-task test grids and the
+// evaluation split. Stem/head stay Dense; -layers swaps hemisphere Ops.
 
 const defaultLR = 0.01
 
 type job struct {
+	kind  CellKind
 	nHemi int
 }
 
@@ -95,7 +96,8 @@ func main() {
 	camerals := flag.Int("camerals", 5, "max native hemispheres (sweeps cam-min..N plus Dense)")
 	camMin := flag.Int("cam-min", 2, "first cameral count (inclusive)")
 	only := flag.Int("only", 0, "run exactly this many hemispheres (no Dense, no 2..N sweep)")
-	layerName := flag.String("layer", "dense", "cell kind (dense now; others reserved)")
+	layerName := flag.String("layer", "dense", "single cell kind when -layers is empty")
+	layersFlag := flag.String("layers", "", "comma/space list of hemisphere kinds, or 'all' (every kind except dense). leftover args also count")
 	hidden := flag.Int("hidden", 64, "hidden width")
 	itemTime := flag.Duration("item-time", 125*time.Millisecond, "TrainStackMSE budget per training demo")
 	passes := flag.Int("passes", 1, "cycles over the full training demo set")
@@ -107,7 +109,7 @@ func main() {
 	noDense := flag.Bool("no-dense", false, "skip Dense baseline")
 	flag.Parse()
 
-	kind, err := parseCellKind(*layerName)
+	kinds, err := parseLayerList(*layerName, *layersFlag, flag.Args())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
 		os.Exit(2)
@@ -153,7 +155,7 @@ func main() {
 
 	mode := parallel.ModeStepTweenChain
 	dim := vecDim(MaxGrid)
-	jobs := buildJobs(*camMin, *camerals, !*noDense)
+	jobs := buildJobs(kinds, *camMin, *camerals, !*noDense)
 	if *workers <= 0 {
 		*workers = len(jobs)
 		if n := runtime.NumCPU(); n < *workers {
@@ -170,20 +172,21 @@ func main() {
 	fmt.Println("╚═════════════════════════════════════════════════════════════════════════════════════╝")
 	fmt.Printf("\n📂 train %s\n📂 eval  %s\n", trainDir, evalDir)
 	fmt.Printf("🧩 train tasks=%d  demos=%d  eval tasks=%d\n", len(trainTasks), len(demos), len(evalTasks))
-	fmt.Printf("🧠")
-	if !*noDense {
+	fmt.Printf("🧠 layers=%s\n", kindsCSV(kinds))
+	fmt.Printf("   arches:")
+	if !*noDense && containsKind(kinds, KindDense) {
 		fmt.Printf(" Dense")
 	}
 	for n := *camMin; n <= *camerals; n++ {
 		fmt.Printf(" + %s", camName(n))
 	}
 	fmt.Printf("  → %d nets  workers=%d  cpus=%d\n", len(jobs), *workers, runtime.NumCPU())
-	fmt.Printf("⏱️  %s/demo × %d pass(es)  (~%s train/net)  layer=%s hidden=%d dim=%d lr=%.4f  mode=%s\n\n",
-		*itemTime, *passes, time.Duration(len(demos)**passes)**itemTime, kind, *hidden, dim, *lr, mode)
+	fmt.Printf("⏱️  %s/demo × %d pass(es)  (~%s train/net)  hidden=%d dim=%d lr=%.4f  mode=%s\n\n",
+		*itemTime, *passes, time.Duration(len(demos)**passes)**itemTime, *hidden, dim, *lr, mode)
 
 	results := &RunResults{
 		Engine:       "welvet-v0.95.1-native-cam",
-		Layer:        string(kind),
+		Layer:        kindsCSV(kinds),
 		Mode:         mode.String(),
 		Camerals:     *camerals,
 		Hidden:       *hidden,
@@ -200,7 +203,7 @@ func main() {
 		ScoreFormula: "Throughput × Availability × SoftAcc / 10000",
 	}
 	for i, j := range jobs {
-		results.Jobs[i] = camName(j.nHemi)
+		results.Jobs[i] = jobName(j.kind, j.nHemi)
 	}
 
 	start := time.Now()
@@ -213,8 +216,8 @@ func main() {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			name := camName(j.nHemi)
-			r := runArch(j, kind, *hidden, *itemTime, *passes, *lr, mode, demos, trainTasks, evalTasks)
+			name := jobName(j.kind, j.nHemi)
+			r := runArch(j, *hidden, *itemTime, *passes, *lr, mode, demos, trainTasks, evalTasks)
 			mu.Lock()
 			results.Results[name] = r
 			mu.Unlock()
@@ -230,7 +233,7 @@ func main() {
 	wg.Wait()
 	results.Duration = time.Since(start).String()
 	saveResults(results)
-	printSummary(results)
+	printAllSummaries(results)
 }
 
 func splitDirs(set, override string) (trainDir, evalDir string) {
@@ -251,13 +254,27 @@ func splitDirs(set, override string) (trainDir, evalDir string) {
 	return filepath.Join(root, "training"), filepath.Join(root, "evaluation")
 }
 
-func buildJobs(camMin, camMax int, includeDense bool) []job {
-	var out []job
-	if includeDense {
-		out = append(out, job{nHemi: 1})
+func containsKind(kinds []CellKind, want CellKind) bool {
+	for _, k := range kinds {
+		if k == want {
+			return true
+		}
 	}
-	for n := camMin; n <= camMax; n++ {
-		out = append(out, job{nHemi: n})
+	return false
+}
+
+func buildJobs(kinds []CellKind, camMin, camMax int, includeDense bool) []job {
+	var out []job
+	for _, k := range kinds {
+		if k == KindDense && includeDense {
+			out = append(out, job{kind: k, nHemi: 1})
+		}
+		for n := camMin; n <= camMax; n++ {
+			if k == KindDense && includeDense && n == 1 {
+				continue
+			}
+			out = append(out, job{kind: k, nHemi: n})
+		}
 	}
 	return out
 }
@@ -277,22 +294,22 @@ func flattenDemos(tasks []Task) []encodedPair {
 	return out
 }
 
-func runArch(j job, kind CellKind, hidden int, itemTime time.Duration, passes int, lr float64, mode parallel.TrainMode, demos []encodedPair, trainTasks, evalTasks []Task) *ArchResult {
+func runArch(j job, hidden int, itemTime time.Duration, passes int, lr float64, mode parallel.TrainMode, demos []encodedPair, trainTasks, evalTasks []Task) *ArchResult {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
 	r := &ArchResult{
-		Label:    camName(j.nHemi),
+		Label:    jobName(j.kind, j.nHemi),
 		Arch:     camName(j.nHemi),
 		Hemis:    j.nHemi,
-		Layer:    string(kind),
+		Layer:    string(j.kind),
 		Mode:     mode.String(),
 		Items:    len(demos),
 		Passes:   passes,
 		ItemTime: itemTime.String(),
 	}
 
-	stack, err := buildNativeCameral(kind, vecDim(MaxGrid), hidden, vecDim(MaxGrid), j.nHemi, mode)
+	stack, err := buildNativeCameral(j.kind, vecDim(MaxGrid), hidden, vecDim(MaxGrid), j.nHemi, mode)
 	if err != nil {
 		r.Err = err.Error()
 		return r
@@ -302,7 +319,7 @@ func runArch(j job, kind CellKind, hidden int, itemTime time.Duration, passes in
 	heapMu.Lock()
 	before := heapNow()
 	heapMu.Unlock()
-	fmt.Printf("🚀 [%s] cycling %d demos  weights=%.1f KiB  hemis=%d\n", r.Arch, len(demos), r.WeightKiB, j.nHemi)
+	fmt.Printf("🚀 [%s] cycling %d demos  weights=%.1f KiB  hemis=%d  layer=%s\n", r.Label, len(demos), r.WeightKiB, j.nHemi, j.kind)
 
 	wall0 := time.Now()
 	var totalTrain, totalInfer time.Duration
@@ -409,7 +426,7 @@ func runArch(j job, kind CellKind, hidden int, itemTime time.Duration, passes in
 			done++
 			if done%logEvery == 0 || done == total {
 				fmt.Printf("   [%s] %d/%d  last=%s  steps=%d  item=%.4f  mean100=%.4f  soft=%.1f  pix=%.1f\n",
-					r.Arch, done, total, item.taskID, steps, lastLoss, meanF(roll), meanF(rollSoft), pix)
+					r.Label, done, total, item.taskID, steps, lastLoss, meanF(roll), meanF(rollSoft), pix)
 			}
 		}
 	}
@@ -546,44 +563,73 @@ func saveResults(results *RunResults) {
 	fmt.Println("\n✅ Results saved to test44_results.json")
 }
 
-func printSummary(results *RunResults) {
-	fmt.Println()
-	fmt.Println("╔══════════════════════════════════════════════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║  ARC — fit demos / solve training tests / eval split (exact = official grid match)                       ║")
-	fmt.Println("╠══════════════════════════════════════════════════════════════════════════════════════════════════════════╣")
-	fmt.Printf("║  %-14s │ KiB  │ FitPix │ TrainPix │ TrainSolve │ EvalPix │ EvalSolve │ Steps    │ MeanLoss ║\n", "Arch")
-	fmt.Println("║  ──────────────┼──────┼────────┼──────────┼────────────┼─────────┼───────────┼──────────┼──────────║")
+func printAllSummaries(results *RunResults) {
+	seen := map[string]bool{}
+	var order []string
 	for _, name := range results.Jobs {
+		r := results.Results[name]
+		if r == nil || r.Layer == "" {
+			continue
+		}
+		if !seen[r.Layer] {
+			seen[r.Layer] = true
+			order = append(order, r.Layer)
+		}
+	}
+	for _, layer := range order {
+		var names []string
+		for _, name := range results.Jobs {
+			r := results.Results[name]
+			if r != nil && r.Layer == layer {
+				names = append(names, name)
+			}
+		}
+		printSummary(results, fmt.Sprintf("layer %s", layer), names)
+	}
+	if len(order) > 1 {
+		printSummary(results, "COMPARE all layers", results.Jobs)
+	}
+}
+
+func printSummary(results *RunResults, title string, names []string) {
+	fmt.Println()
+	fmt.Println("╔════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗")
+	fmt.Printf("║  ARC — fit demos / solve training tests / eval split (exact = official grid match)\n")
+	fmt.Printf("║  %s\n", title)
+	fmt.Println("╠════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╣")
+	fmt.Printf("║  %-22s │ KiB  │ FitPix │ TrainPix │ TrainSolve │ EvalPix │ EvalSolve │ Steps    │ MeanLoss ║\n", "Arch")
+	fmt.Println("║  ──────────────────────┼──────┼────────┼──────────┼────────────┼─────────┼───────────┼──────────┼──────────║")
+	for _, name := range names {
 		r := results.Results[name]
 		if r == nil {
 			continue
 		}
 		if r.Err != "" {
-			fmt.Printf("║  %-14s │ ERR %s\n", name, r.Err)
+			fmt.Printf("║  %-22s │ ERR %s\n", name, r.Err)
 			continue
 		}
-		fmt.Printf("║  %-14s │ %4.0f │ %5.1f%% │  %5.1f%%  │ %4d/%-4d  │ %5.1f%%  │ %4d/%-4d │ %8d │ %8.4f ║\n",
+		fmt.Printf("║  %-22s │ %4.0f │ %5.1f%% │  %5.1f%%  │ %4d/%-4d  │ %5.1f%%  │ %4d/%-4d │ %8d │ %8.4f ║\n",
 			name, r.WeightKiB, r.Fit.MeanPixel, r.Train.MeanPixel,
 			r.Train.Solved, r.Train.Tasks,
 			r.Eval.MeanPixel, r.Eval.Solved, r.Eval.Tasks,
 			r.TrainSteps, r.MeanLoss)
 	}
 
-	fmt.Println("╠══════════════════════════════════════════════════════════════════════════════════════════════════════════╣")
-	fmt.Println("║  LUCY / tide — Score = T × Availability × SoftAcc / 10_000   |   MobileScore = Score / WeightMiB          ║")
-	fmt.Println("╠══════════════════════════════════════════════════════════════════════════════════════════════════════════╣")
-	fmt.Println("║  Arch           │ Soft   │ Adapt  │ Avail  │ Stab   │ Cons   │ Tput     │ Score    │ Mobile  │ ZDT    ║")
-	fmt.Println("║  ───────────────┼────────┼────────┼────────┼────────┼────────┼──────────┼──────────┼─────────┼────────║")
+	fmt.Println("╠════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╣")
+	fmt.Println("║  LUCY / tide — Score = T × Availability × SoftAcc / 10_000   |   MobileScore = Score / WeightMiB")
+	fmt.Println("╠════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╣")
+	fmt.Println("║  Arch                   │ Soft   │ Adapt  │ Avail  │ Stab   │ Cons   │ Tput     │ Score    │ Mobile  │ ZDT    ║")
+	fmt.Println("║  ───────────────────────┼────────┼────────┼────────┼────────┼────────┼──────────┼──────────┼─────────┼────────║")
 	best, bestName := -1.0, ""
 	bestMob, bestMobName := -1.0, ""
 	bestRAM, bestRAMName := int64(1<<62), ""
-	for _, name := range results.Jobs {
+	for _, name := range names {
 		r := results.Results[name]
 		if r == nil || r.Err != "" {
 			continue
 		}
 		s := r.Lucy
-		fmt.Printf("║  %-14s │ %5.1f%% │ %5.1f%% │ %5.1f%% │ %5.1f%% │ %5.1f%% │ %8.0f │ %8.0f │ %7.0f │ %6.1f ║\n",
+		fmt.Printf("║  %-22s │ %5.1f%% │ %5.1f%% │ %5.1f%% │ %5.1f%% │ %5.1f%% │ %8.0f │ %8.0f │ %7.0f │ %6.1f ║\n",
 			name, s.SoftAcc, s.AdaptPct, s.Availability, s.Stability, s.Consistency,
 			s.Throughput, s.Score, s.MobileScore, s.ZeroDowntime)
 		if s.Score > best {
@@ -596,27 +642,27 @@ func printSummary(results *RunResults) {
 			bestRAM, bestRAMName = s.WeightBytes, name
 		}
 	}
-	fmt.Println("╠══════════════════════════════════════════════════════════════════════════════════════════════════════════╣")
+	fmt.Println("╠════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╣")
 	fmt.Printf("║  InferMs/TrainMs + Acc/sec:\n")
-	for _, name := range results.Jobs {
+	for _, name := range names {
 		r := results.Results[name]
 		if r == nil || r.Err != "" {
 			continue
 		}
 		s := r.Lucy
-		fmt.Printf("║    %-14s  infer=%.0fms train=%.0fms  t25=%.1fs t50=%.1fs  acc/s=%.3f  heap=%.1fKiB\n",
+		fmt.Printf("║    %-22s  infer=%.0fms train=%.0fms  t25=%.1fs t50=%.1fs  acc/s=%.3f  heap=%.1fKiB\n",
 			name, s.InferMs, s.TrainMs, s.TimeToAcc25Sec, s.TimeToAcc50Sec, s.AccPerSec, s.HeapMiB*1024)
 	}
-	fmt.Printf("║  🏆 WINNER (Score):        %-14s  %.0f\n", bestName, best)
-	fmt.Printf("║  📱 Best mobile Score/MiB: %-14s  %.0f\n", bestMobName, bestMob)
-	fmt.Printf("║  💾 Smallest weights:      %-14s  %.1f KiB\n", bestRAMName, float64(bestRAM)/1024)
+	fmt.Printf("║  🏆 WINNER (Score):        %-22s  %.0f\n", bestName, best)
+	fmt.Printf("║  📱 Best mobile Score/MiB: %-22s  %.0f\n", bestMobName, bestMob)
+	fmt.Printf("║  💾 Smallest weights:      %-22s  %.1f KiB\n", bestRAMName, float64(bestRAM)/1024)
 	fmt.Printf("║  train tasks=%d demos=%d  eval tasks=%d  item-time=%s  passes=%d  duration=%s\n",
 		results.TrainN, results.TrainItems, results.EvalN, results.ItemTime, results.Passes, results.Duration)
 	fmt.Printf("║  layer=%s  mode=%s  camerals≤%d  hidden=%d  duty=%s\n",
-		results.Layer, results.Mode, results.Camerals, results.Hidden, dutyClockName())
+		title, results.Mode, results.Camerals, results.Hidden, dutyClockName())
 	fmt.Println("║  AdaptPct = mean SoftAcc on first 4 demos after each task switch (tide AdaptWindows).")
 	fmt.Println("║  Availability = InferMs/(InferMs+TrainMs)×100  |  MobileScore = Score/WeightMiB")
-	fmt.Println("╚══════════════════════════════════════════════════════════════════════════════════════════════════════════╝")
+	fmt.Println("╚════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝")
 }
 
 var heapMu sync.Mutex
