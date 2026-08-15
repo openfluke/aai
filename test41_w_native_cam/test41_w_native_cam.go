@@ -122,25 +122,29 @@ const (
 	ModeStepTweenSplit
 	ModeTweenAlt
 	ModeStepTweenAlt
+	ModeTweenSplitHeadProxy
+	ModeTweenSplitLinear
 	ModeMeshBP
 	ModeMeshTween
 	ModeMeshTweenChain
 )
 
 var modeNames = map[TrainingMode]string{
-	ModeNormalBP:       "NormalBP",
-	ModeStepBP:         "StepBP",
-	ModeTween:          "Tween",
-	ModeTweenChain:     "TweenChain",
-	ModeStepTween:      "StepTween",
-	ModeStepTweenChain: "StepTweenChain",
-	ModeTweenSplit:     "TweenSplit",
-	ModeStepTweenSplit: "StepTweenSplit",
-	ModeTweenAlt:       "TweenAlt",
-	ModeStepTweenAlt:   "StepTweenAlt",
-	ModeMeshBP:         "MeshBP",
-	ModeMeshTween:      "MeshTween",
-	ModeMeshTweenChain: "MeshTweenChain",
+	ModeNormalBP:            "NormalBP",
+	ModeStepBP:              "StepBP",
+	ModeTween:               "Tween",
+	ModeTweenChain:          "TweenChain",
+	ModeStepTween:           "StepTween",
+	ModeStepTweenChain:      "StepTweenChain",
+	ModeTweenSplit:          "TweenSplit",
+	ModeStepTweenSplit:      "StepTweenSplit",
+	ModeTweenAlt:            "TweenAlt",
+	ModeStepTweenAlt:        "StepTweenAlt",
+	ModeTweenSplitHeadProxy: "TweenSplitHeadProxy",
+	ModeTweenSplitLinear:    "TweenSplitLinear",
+	ModeMeshBP:              "MeshBP",
+	ModeMeshTween:           "MeshTween",
+	ModeMeshTweenChain:      "MeshTweenChain",
 }
 
 func isMeshMode(m TrainingMode) bool {
@@ -149,7 +153,8 @@ func isMeshMode(m TrainingMode) bool {
 
 func isStackCreditMode(m TrainingMode) bool {
 	switch m {
-	case ModeTweenSplit, ModeStepTweenSplit, ModeTweenAlt, ModeStepTweenAlt:
+	case ModeTweenSplit, ModeStepTweenSplit, ModeTweenAlt, ModeStepTweenAlt,
+		ModeTweenSplitHeadProxy, ModeTweenSplitLinear:
 		return true
 	default:
 		return false
@@ -166,6 +171,10 @@ func toParallelMode(m TrainingMode) (parallel.TrainMode, bool) {
 		return parallel.ModeTweenAlt, true
 	case ModeStepTweenAlt:
 		return parallel.ModeStepTweenAlt, true
+	case ModeTweenSplitHeadProxy:
+		return parallel.ModeTweenSplitHeadProxy, true
+	case ModeTweenSplitLinear:
+		return parallel.ModeTweenSplitLinear, true
 	default:
 		return 0, false
 	}
@@ -412,6 +421,10 @@ func parseJobModes(s string) (seq, mesh []TrainingMode, err error) {
 			m = ModeTweenAlt
 		case "steptweenalt", "stepalt":
 			m = ModeStepTweenAlt
+		case "headproxy", "tweensplitheadproxy", "proxy":
+			m = ModeTweenSplitHeadProxy
+		case "linear", "tweensplitlinear":
+			m = ModeTweenSplitLinear
 		case "meshbp":
 			m, isMesh = ModeMeshBP, true
 		case "meshtween":

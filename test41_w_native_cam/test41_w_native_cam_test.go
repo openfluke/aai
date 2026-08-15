@@ -67,6 +67,31 @@ func TestBuildJobsUniformCount(t *testing.T) {
 	}
 }
 
+func TestParseJobModesWeightedOptIn(t *testing.T) {
+	seq, mesh, err := parseJobModes("stepbp,tweensplit,steptweensplit,headproxy,linear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mesh) != 0 {
+		t.Fatalf("mesh %v", mesh)
+	}
+	want := []TrainingMode{
+		ModeStepBP, ModeTweenSplit, ModeStepTweenSplit,
+		ModeTweenSplitHeadProxy, ModeTweenSplitLinear,
+	}
+	if len(seq) != len(want) {
+		t.Fatalf("got %v", seq)
+	}
+	for i := range want {
+		if seq[i] != want[i] {
+			t.Fatalf("got %v want %v", seq, want)
+		}
+	}
+	if _, ok := toParallelMode(ModeTweenSplitHeadProxy); !ok {
+		t.Fatal("headproxy should be Stack credit")
+	}
+}
+
 func TestToParallelMode(t *testing.T) {
 	pm, ok := toParallelMode(ModeTweenAlt)
 	if !ok || pm != parallel.ModeTweenAlt {
