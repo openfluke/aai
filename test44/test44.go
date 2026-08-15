@@ -94,6 +94,7 @@ func main() {
 	offset := flag.Int("offset", 0, "skip first N tasks in each split")
 	camerals := flag.Int("camerals", 5, "max native hemispheres (sweeps cam-min..N plus Dense)")
 	camMin := flag.Int("cam-min", 2, "first cameral count (inclusive)")
+	only := flag.Int("only", 0, "run exactly this many hemispheres (no Dense, no 2..N sweep)")
 	layerName := flag.String("layer", "dense", "cell kind (dense now; others reserved)")
 	hidden := flag.Int("hidden", 64, "hidden width")
 	itemTime := flag.Duration("item-time", 125*time.Millisecond, "TrainStackMSE budget per training demo")
@@ -111,11 +112,16 @@ func main() {
 		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
 		os.Exit(2)
 	}
+	if *only > 0 {
+		*camMin = *only
+		*camerals = *only
+		*noDense = true
+	}
 	if *camerals < 1 {
 		*camerals = 1
 	}
-	if *camMin < 2 {
-		*camMin = 2
+	if *camMin < 1 {
+		*camMin = 1
 	}
 	if *camMin > *camerals {
 		*camMin = *camerals
