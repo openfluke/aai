@@ -18,10 +18,12 @@ MobileScore). Full dtype×quant matrix → [`test41_w_native_cam_perm`](../test4
 
 | Kind | Modes |
 |------|--------|
-| Sequential (all arches) | NormalBP, StepBP, Tween, TweenChain, StepTween, StepTweenChain |
+| Sequential (all arches) | NormalBP, StepBP, Tween, TweenChain, StepTween, StepTweenChain, **TweenSplit, StepTweenSplit, TweenAlt, StepTweenAlt** |
 | Mesh (Dense only) | MeshBP, MeshTween, MeshTweenChain |
 
-→ **27 uniform** + Mix distinct-mode perms (float32 / none @ SIMD).
+→ **43 uniform** (4 arches × 10 seq + 3 mesh) + Mix distinct-mode perms on the **original 6** seq modes (float32 / none @ SIMD).
+
+Split / Alt train via `TrainStackMSE` (Grid `tween.State` has no Split/Alt). BP/Tween uniform jobs stay on the Grid loop so the historical board is comparable. `-alt-times` sets Split→Tween pairs for TweenAlt.
 
 ### Mix — distinct-mode permutations on Bi / Tri / Quad
 
@@ -32,19 +34,21 @@ Order matters: `NormalBP∥StepBP` ≠ `StepBP∥NormalBP`.
 
 | Scope (`-mix`) | Jobs added | Formula |
 |----------------|-----------:|---------|
-| `off` | 0 | uniform only (27) |
+| `off` (flag default) | 0 | uniform only (**43**) |
 | `bi` | **30** | P(6,2) |
 | `tri` | **120** | P(6,3) |
 | `quad` | **360** | P(6,4) |
-| `hex` | **1** | all 6 modes once |
-| `all` (default) | **511** | bi+tri+quad+hex → **538** total |
+| `hex` | **1** | all 6 Mix modes once |
+| `all` | **511** | bi+tri+quad+hex → **554** with 43 uniforms |
 
 Examples: `Bicameral/Mix(NormalBP∥StepBP)`, `Bicameral/Mix(Tween∥StepBP)`, …
 
 ```bash
-go run .              # full Mix perms (538)
-go run . -mix bi      # Bi pairs only (57)
+go run .              # uniform 43 (mix off)
+go run . -mix bi      # Bi pairs only
 go run . -mix off     # uniform only
+go run . -modes tweensplit,steptweensplit,tweenalt,steptweenalt -duration 2s
+go run . -modes tweenalt,steptweenalt -alt-times 3
 ```
 
 
@@ -57,7 +61,9 @@ go run . -mix off     # uniform only
 | Window | 50ms | `-window` |
 | AdaptWindows | **10** (=500ms) | `-adapt-windows` |
 | Workers | **1** | `-workers` |
-| Mix | **all** (511 Mix + 27) | `-mix` |
+| Mix | **off** (uniform 43) | `-mix` |
+| Modes | **all** (10 seq + 3 mesh) | `-modes` |
+| TweenAlt pairs | **1** | `-alt-times` |
 | Backend | SIMD | — |
 | Duty clock | thread-CPU | — |
 
@@ -65,7 +71,10 @@ go run . -mix off     # uniform only
 cd loom/arcagitesting/test41_w_native_cam
 go run .
 
-# short / perm-like race
+# Split / Alt vs the old six (short race)
+go run . -modes tweensplit,steptweensplit,tweenalt,steptweenalt -duration 2s -switch 500ms -adapt-windows 4
+
+# short / perm-like race (all modes)
 go run . -duration 2s -switch 500ms -adapt-windows 4
 ```
 
@@ -76,7 +85,8 @@ Writes `test41_w_native_cam_results.json`.
 ## Snapshot results (float32 / none @ SIMD)
 
 Run: `-workers 1 -duration 10s -switch 2.5s -adapt-windows 10` · duty =
-thread-CPU · **27/27** passed.
+thread-CPU · **27/27** passed. Board below is **pre-Split/Alt** (6 seq modes).
+Re-run with default `-modes all` for the extra 16 uniform columns.
 
 ### SoftAcc timeline (1s blocks)
 

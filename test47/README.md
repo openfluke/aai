@@ -13,7 +13,7 @@ Not ARC. XOR / sine / copy, **every layer kind**, six credit modes:
 
 On Stack/Parallel (no Grid), **Step\* and non-Step collapse to the same family update** — the table still runs them as separate jobs so you can see they match. `chain` is actual backprop.
 
-`TweenAlt` with `-alt-times 3` is Split → Tween → Split → Tween → Split → Tween **per sample**. Default is `1` (one Split, then one Tween).
+`TweenAlt` with `-alt-times 3` is Split → Tween → Split → Tween → Split → Tween **per sample**. Default is `1` (one Split, then one Tween). Keep it as a third column: on copy it has diverged from Split (residual/rnn/layernorm bicameral Acc lifts on the order of +5–12). XOR Acc is 4-point lottery; sine often sits on Split’s 59.4 plateau. Alt can also NaN where Split is already shaky (mamba/swiglu).
 
 ```bash
 cd apps/aai/test47

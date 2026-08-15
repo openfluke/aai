@@ -34,12 +34,15 @@ import (
 // native welvet cameral API (Hemispheres + Place), not hand-wired Parallel.
 //
 // Architectures (seq modes only — mesh needs equal-width Dense ticks):
-//   Bicameral  — Dense in → Hemispheres(n=2, add) → Dense out
-//   Tricameral — Dense in → Hemispheres(n=3, add) → Dense out
-//   Quadcameral— Dense in → Hemispheres(n=4, add) → Dense out
-//   Mix        — Hemispheres(n=6): one of each seq mode (canonical hex)
 //
-// Uniform Bi/Tri/Quad train through the Grid loop (one mode for the whole net).
+//	Bicameral  — Dense in → Hemispheres(n=2, add) → Dense out
+//	Tricameral — Dense in → Hemispheres(n=3, add) → Dense out
+//	Quadcameral— Dense in → Hemispheres(n=4, add) → Dense out
+//	Mix        — Hemispheres(n=6): one of each seq mode (canonical hex)
+//
+// Uniform Bi/Tri/Quad BP/Tween train through the Grid loop (one mode for the whole net).
+// TweenSplit / StepTweenSplit / TweenAlt / StepTweenAlt are Stack + TrainStackMSE
+// (Grid tween.State has no Split/Alt). Mix perms stay the original 6 seq modes.
 // Mix variants: distinct-mode permutations on Bi/Tri/Quad (+ optional hex),
 // trained via Stack + TrainStackMSE. -mix off|bi|tri|quad|all (default off).
 //
@@ -47,7 +50,6 @@ import (
 // Measuring math is welvet/lucy (same equations as perm/tide/live_mnist).
 // Short perm-aligned race: -duration 2s -switch 500ms -adapt-windows 4
 // (full dtype×quant matrix lives in test41_w_native_cam_perm).
-//
 const (
 	InputSize  = 10
 	HiddenSize = 32
@@ -116,6 +118,10 @@ const (
 	ModeTweenChain
 	ModeStepTween
 	ModeStepTweenChain
+	ModeTweenSplit
+	ModeStepTweenSplit
+	ModeTweenAlt
+	ModeStepTweenAlt
 	ModeMeshBP
 	ModeMeshTween
 	ModeMeshTweenChain
@@ -128,6 +134,10 @@ var modeNames = map[TrainingMode]string{
 	ModeTweenChain:     "TweenChain",
 	ModeStepTween:      "StepTween",
 	ModeStepTweenChain: "StepTweenChain",
+	ModeTweenSplit:     "TweenSplit",
+	ModeStepTweenSplit: "StepTweenSplit",
+	ModeTweenAlt:       "TweenAlt",
+	ModeStepTweenAlt:   "StepTweenAlt",
 	ModeMeshBP:         "MeshBP",
 	ModeMeshTween:      "MeshTween",
 	ModeMeshTweenChain: "MeshTweenChain",
@@ -135,6 +145,30 @@ var modeNames = map[TrainingMode]string{
 
 func isMeshMode(m TrainingMode) bool {
 	return m == ModeMeshBP || m == ModeMeshTween || m == ModeMeshTweenChain
+}
+
+func isStackCreditMode(m TrainingMode) bool {
+	switch m {
+	case ModeTweenSplit, ModeStepTweenSplit, ModeTweenAlt, ModeStepTweenAlt:
+		return true
+	default:
+		return false
+	}
+}
+
+func toParallelMode(m TrainingMode) (parallel.TrainMode, bool) {
+	switch m {
+	case ModeTweenSplit:
+		return parallel.ModeTweenSplit, true
+	case ModeStepTweenSplit:
+		return parallel.ModeStepTweenSplit, true
+	case ModeTweenAlt:
+		return parallel.ModeTweenAlt, true
+	case ModeStepTweenAlt:
+		return parallel.ModeStepTweenAlt, true
+	default:
+		return 0, false
+	}
 }
 
 func isTweenMode(m TrainingMode) bool {
@@ -167,31 +201,32 @@ type TimeWindow struct {
 }
 
 type ModeResult struct {
-	Label           string             `json:"label"`
-	Arch            string             `json:"arch"`
-	Mode            string             `json:"mode"`
-	Windows         []TimeWindow       `json:"windows"`
-	TotalAttempts   int                `json:"totalAttempts"`
-	TotalFreqSwitch int                `json:"totalFreqSwitches"`
-	ZeroOutWindows  int                `json:"zeroOutputWindows"`
-	AvgLatencyMs    float64            `json:"avgLatencyMs"`
-	MaxLatencyMs    float64            `json:"maxLatencyMs"`
-	Lucy            lucy.Snapshot      `json:"lucy"` // SoftAcc / Score / AdaptPct / …
+	Label           string        `json:"label"`
+	Arch            string        `json:"arch"`
+	Mode            string        `json:"mode"`
+	Windows         []TimeWindow  `json:"windows"`
+	TotalAttempts   int           `json:"totalAttempts"`
+	TotalFreqSwitch int           `json:"totalFreqSwitches"`
+	ZeroOutWindows  int           `json:"zeroOutputWindows"`
+	AvgLatencyMs    float64       `json:"avgLatencyMs"`
+	MaxLatencyMs    float64       `json:"maxLatencyMs"`
+	Lucy            lucy.Snapshot `json:"lucy"` // SoftAcc / Score / AdaptPct / …
 }
 
 type BenchmarkResults struct {
-	Modes         []string               `json:"modes"`
-	Results       map[string]*ModeResult `json:"results"`
-	Timestamp     string                 `json:"timestamp"`
-	Duration      string                 `json:"duration"`
-	SwitchMs      int                    `json:"switchMs"`
-	WindowMs      int                    `json:"windowMs"`
-	AdaptWindows  int                    `json:"adaptWindows"`
-	Workers       int                    `json:"workers"`
-	Frequencies   []float64              `json:"frequencies"`
-	Engine        string                 `json:"engine"`
-	SoftAccScale  float64                `json:"softAccScale"`
-	ScoreFormula  string                 `json:"scoreFormula"`
+	Modes        []string               `json:"modes"`
+	Results      map[string]*ModeResult `json:"results"`
+	Timestamp    string                 `json:"timestamp"`
+	Duration     string                 `json:"duration"`
+	SwitchMs     int                    `json:"switchMs"`
+	WindowMs     int                    `json:"windowMs"`
+	AdaptWindows int                    `json:"adaptWindows"`
+	Workers      int                    `json:"workers"`
+	Frequencies  []float64              `json:"frequencies"`
+	Engine       string                 `json:"engine"`
+	SoftAccScale float64                `json:"softAccScale"`
+	ScoreFormula string                 `json:"scoreFormula"`
+	AltTimes     int                    `json:"altTimes"`
 }
 
 // Protocol knobs — set from flags in main (defaults match sine_ada long race).
@@ -201,6 +236,7 @@ var (
 	switchInterval = SwitchInterval
 	adaptWindows   = AdaptWindows
 	jobWorkers     = 1 // default serial — comparable wall-Tput/Score; raise for smoke only
+	altTimes       = 1 // TweenAlt: Split→Tween pairs per TrainStackMSE
 )
 
 type job struct {
@@ -227,6 +263,8 @@ func main() {
 	window := flag.Duration("window", WindowDuration, "SoftAcc window")
 	adaptN := flag.Int("adapt-windows", AdaptWindows, "pulse windows after switch folded into AdaptPct")
 	mixScope := flag.String("mix", "off", "Mix distinct-mode perms: off | bi | tri | quad | all (+hex)")
+	modesFlag := flag.String("modes", "all", "all, or comma list: normalbp,stepbp,tween,tweenchain,steptween,steptweenchain,tweensplit,steptweensplit,tweenalt,steptweenalt[,meshbp,meshtween,meshtweenchain]")
+	altTimesFlag := flag.Int("alt-times", 1, "TweenAlt: Split→Tween pairs per TrainStackMSE")
 	flag.Parse()
 
 	testDuration = *dur
@@ -240,6 +278,15 @@ func main() {
 	if jobWorkers < 1 {
 		jobWorkers = 1
 	}
+	altTimes = *altTimesFlag
+	if altTimes < 1 {
+		altTimes = 1
+	}
+	seqModes, meshModes, err := parseJobModes(*modesFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+		os.Exit(2)
+	}
 
 	rand.Seed(time.Now().UnixNano())
 
@@ -249,6 +296,7 @@ func main() {
 	fmt.Println("║   SoftAcc + AdaptPct | Availability = InferMs/(InferMs+TrainMs) | Lucy Score        ║")
 	fmt.Println("║   Cost: WeightBytes + HeapBytes → MobileScore = Score / WeightMiB                   ║")
 	fmt.Println("║   Arch: Dense | Bi/Tri/Quad uniform | Mix(distinct modes ∥) via TrainStackMSE       ║")
+	fmt.Println("║   Split/Alt = native Stack credit (1/N split, or Split↔Tween ping-pong)              ║")
 	fmt.Println("╚═════════════════════════════════════════════════════════════════════════════════════╝")
 
 	frequencies := []float64{1.0, 2.0, 3.0, 4.0}
@@ -258,9 +306,9 @@ func main() {
 		allInputs[i], allTargets[i] = createSamples(generateSineWave(freq))
 	}
 
-	jobs := buildJobs(*mixScope)
-	fmt.Printf("\n📊 %d samples/freq | %d jobs | SoftAccScale=%.2f | mix=%s\n",
-		SinePoints, len(jobs), lucy.SoftAccScaleSine, *mixScope)
+	jobs := buildJobs(*mixScope, seqModes, meshModes)
+	fmt.Printf("\n📊 %d samples/freq | %d jobs | SoftAccScale=%.2f | mix=%s | modes=%s | alt-times=%d\n",
+		SinePoints, len(jobs), lucy.SoftAccScaleSine, *mixScope, *modesFlag, altTimes)
 	fmt.Printf("⏱️  %s/job | switch every %s | adapt %dms (%d×%dms) | workers=%d | duty=%s\n\n",
 		testDuration, switchInterval,
 		adaptWindows*int(windowDuration.Milliseconds()), adaptWindows, windowDuration.Milliseconds(),
@@ -279,6 +327,7 @@ func main() {
 		Engine:       "welvet-native-cam/simd",
 		SoftAccScale: lucy.SoftAccScaleSine,
 		ScoreFormula: "Throughput × Availability × SoftAcc / 10000",
+		AltTimes:     altTimes,
 	}
 	for i, j := range jobs {
 		results.Modes[i] = labelOf(j)
@@ -319,6 +368,75 @@ func seqParallelModes() []parallel.TrainMode {
 	}
 }
 
+func allSeqTrainingModes() []TrainingMode {
+	return []TrainingMode{
+		ModeNormalBP, ModeStepBP,
+		ModeTween, ModeTweenChain,
+		ModeStepTween, ModeStepTweenChain,
+		ModeTweenSplit, ModeStepTweenSplit,
+		ModeTweenAlt, ModeStepTweenAlt,
+	}
+}
+
+func parseJobModes(s string) (seq, mesh []TrainingMode, err error) {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.EqualFold(s, "all") {
+		return allSeqTrainingModes(), []TrainingMode{ModeMeshBP, ModeMeshTween, ModeMeshTweenChain}, nil
+	}
+	seen := map[TrainingMode]bool{}
+	for _, raw := range strings.Split(s, ",") {
+		p := strings.ToLower(strings.TrimSpace(raw))
+		if p == "" {
+			continue
+		}
+		var m TrainingMode
+		isMesh := false
+		switch p {
+		case "normalbp", "bp", "sgd":
+			m = ModeNormalBP
+		case "stepbp":
+			m = ModeStepBP
+		case "tween":
+			m = ModeTween
+		case "tweenchain", "chain":
+			m = ModeTweenChain
+		case "steptween":
+			m = ModeStepTween
+		case "steptweenchain":
+			m = ModeStepTweenChain
+		case "tweensplit", "split":
+			m = ModeTweenSplit
+		case "steptweensplit", "stepsplit":
+			m = ModeStepTweenSplit
+		case "tweenalt", "alt":
+			m = ModeTweenAlt
+		case "steptweenalt", "stepalt":
+			m = ModeStepTweenAlt
+		case "meshbp":
+			m, isMesh = ModeMeshBP, true
+		case "meshtween":
+			m, isMesh = ModeMeshTween, true
+		case "meshtweenchain":
+			m, isMesh = ModeMeshTweenChain, true
+		default:
+			return nil, nil, fmt.Errorf("unknown mode %q", p)
+		}
+		if seen[m] {
+			continue
+		}
+		seen[m] = true
+		if isMesh {
+			mesh = append(mesh, m)
+		} else {
+			seq = append(seq, m)
+		}
+	}
+	if len(seq)+len(mesh) == 0 {
+		return nil, nil, fmt.Errorf("no modes")
+	}
+	return seq, mesh, nil
+}
+
 // appendMixPerms appends all ordered injections of size n (distinct modes).
 // e.g. n=2 → NormalBP∥StepBP, StepBP∥NormalBP, Tween∥StepBP, …
 func appendMixPerms(out []job, arch ArchKind, n int, modes []parallel.TrainMode) []job {
@@ -348,9 +466,7 @@ func appendMixPerms(out []job, arch ArchKind, n int, modes []parallel.TrainMode)
 	return out
 }
 
-func buildJobs(mixScope string) []job {
-	seq := []TrainingMode{ModeNormalBP, ModeStepBP, ModeTween, ModeTweenChain, ModeStepTween, ModeStepTweenChain}
-	mesh := []TrainingMode{ModeMeshBP, ModeMeshTween, ModeMeshTweenChain}
+func buildJobs(mixScope string, seq, mesh []TrainingMode) []job {
 	arches := []ArchKind{ArchDense, ArchBicameral, ArchTricameral, ArchQuadcameral}
 	var out []job
 	for _, a := range arches {
@@ -695,14 +811,82 @@ func createCameralStack(nHemi int, modes []parallel.TrainMode) (*parallel.Stack,
 	s.Exec.MultiCore = true
 	s.Exec.TileSize = 32
 	s.SyncChildExec()
+	s.AltTimes = altTimes
 	return s, nil
+}
+
+func createDenseStack() (*parallel.Stack, error) {
+	stem, err := dense.NewConfigured[float32](InputSize, HiddenSize, core.ActivationLeakyReLU,
+		core.DTypeFloat32, quant.FormatNone, randWeights(HiddenSize, InputSize, InitScale))
+	if err != nil {
+		return nil, err
+	}
+	hid, err := dense.NewConfigured[float32](HiddenSize, HiddenSize, core.ActivationLeakyReLU,
+		core.DTypeFloat32, quant.FormatNone, randWeights(HiddenSize, HiddenSize, InitScale))
+	if err != nil {
+		return nil, err
+	}
+	head, err := dense.NewConfigured[float32](HiddenSize, OutputSize, core.ActivationSigmoid,
+		core.DTypeFloat32, quant.FormatNone, randWeights(OutputSize, HiddenSize, InitScale))
+	if err != nil {
+		return nil, err
+	}
+	s, err := parallel.NewStack(stem, hid, head)
+	if err != nil {
+		return nil, err
+	}
+	s.Exec.Backend = core.BackendSIMD
+	s.Exec.MultiCore = true
+	s.Exec.TileSize = 32
+	s.SyncChildExec()
+	s.AltTimes = altTimes
+	return s, nil
+}
+
+func createUniformStack(arch ArchKind, mode parallel.TrainMode) (*parallel.Stack, error) {
+	if arch == ArchDense {
+		return createDenseStack()
+	}
+	n := archHemiCount(arch)
+	modes := make([]parallel.TrainMode, n)
+	for i := range modes {
+		modes[i] = mode
+	}
+	return createCameralStack(n, modes)
 }
 
 func runBenchmark(j job, allInputs [][][]float32, allTargets [][]float32, frequencies []float64) *ModeResult {
 	if len(j.hemiModes) > 0 {
 		return runMixedBenchmark(j, allInputs, allTargets, frequencies)
 	}
+	if isStackCreditMode(j.mode) {
+		return runStackUniformBenchmark(j, allInputs, allTargets, frequencies)
+	}
 	return runUniformBenchmark(j, allInputs, allTargets, frequencies)
+}
+
+func runStackUniformBenchmark(j job, allInputs [][][]float32, allTargets [][]float32, frequencies []float64) *ModeResult {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	pm, ok := toParallelMode(j.mode)
+	if !ok {
+		r := &ModeResult{Label: labelOf(j), Arch: archNames[j.arch], Mode: modeNames[j.mode]}
+		fmt.Printf("❌ [%s] not a Stack credit mode\n", r.Label)
+		return r
+	}
+
+	heapMu.Lock()
+	before := heapNow()
+	stack, err := createUniformStack(j.arch, pm)
+	after := heapNow()
+	heapMu.Unlock()
+	if err != nil {
+		r := &ModeResult{Label: labelOf(j), Arch: archNames[j.arch], Mode: modeNames[j.mode]}
+		fmt.Printf("❌ [%s] createUniformStack: %v\n", r.Label, err)
+		return r
+	}
+	return runStackMSELoop(labelOf(j), archNames[j.arch], modeNames[j.mode], stack, pm, after-before, allInputs, allTargets, frequencies)
 }
 
 func runMixedBenchmark(j job, allInputs [][][]float32, allTargets [][]float32, frequencies []float64) *ModeResult {
@@ -713,16 +897,6 @@ func runMixedBenchmark(j job, allInputs [][][]float32, allTargets [][]float32, f
 	if nHemi == 0 {
 		nHemi = archHemiCount(j.arch)
 	}
-	numWindows := int(testDuration / windowDuration)
-	result := &ModeResult{
-		Label:   labelOf(j),
-		Arch:    archNames[j.arch],
-		Mode:    labelOf(j),
-		Windows: make([]TimeWindow, numWindows),
-	}
-	for i := range result.Windows {
-		result.Windows[i].TimeMs = (i + 1) * int(windowDuration.Milliseconds())
-	}
 
 	heapMu.Lock()
 	before := heapNow()
@@ -730,10 +904,26 @@ func runMixedBenchmark(j job, allInputs [][][]float32, allTargets [][]float32, f
 	after := heapNow()
 	heapMu.Unlock()
 	if err != nil {
-		fmt.Printf("❌ [%s] createCameralStack: %v\n", result.Label, err)
-		return result
+		r := &ModeResult{Label: labelOf(j), Arch: archNames[j.arch], Mode: labelOf(j)}
+		fmt.Printf("❌ [%s] createCameralStack: %v\n", r.Label, err)
+		return r
 	}
-	result.Lucy.HeapBytes = int64(after - before)
+	// Parent mode for Resolve(Inherit); BranchModes override each hemi.
+	return runStackMSELoop(labelOf(j), archNames[j.arch], labelOf(j), stack, parallel.ModeStepBP, after-before, allInputs, allTargets, frequencies)
+}
+
+func runStackMSELoop(label, arch, mode string, stack *parallel.Stack, parent parallel.TrainMode, heapDelta uint64, allInputs [][][]float32, allTargets [][]float32, frequencies []float64) *ModeResult {
+	numWindows := int(testDuration / windowDuration)
+	result := &ModeResult{
+		Label:   label,
+		Arch:    arch,
+		Mode:    mode,
+		Windows: make([]TimeWindow, numWindows),
+	}
+	for i := range result.Windows {
+		result.Windows[i].TimeMs = (i + 1) * int(windowDuration.Milliseconds())
+	}
+	result.Lucy.HeapBytes = int64(heapDelta)
 	if result.Lucy.HeapBytes < 0 {
 		result.Lucy.HeapBytes = 0
 	}
@@ -746,8 +936,6 @@ func runMixedBenchmark(j job, allInputs [][][]float32, allTargets [][]float32, f
 	lastSwitchTime := start
 	lastOutputTime := start
 	var totalInfer, totalTrain time.Duration
-	// Parent mode for Resolve(Inherit); BranchModes override each hemi.
-	parent := parallel.ModeStepBP
 
 	for time.Since(start) < testDuration {
 		elapsed := time.Since(start)
