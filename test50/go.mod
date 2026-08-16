@@ -1,4 +1,4 @@
-module github.com/openfluke/loom/arcagitesting/test41_w_sine_ada
+module github.com/openfluke/loom/arcagitesting/test50
 
 go 1.22.5
 

@@ -1,0 +1,17 @@
+*.json
+*.log
+*.txt
+*.csv
+*.pkl
+.venv/
+*.xlsx
+*.xls
+*.doc
+*.docx
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+__pycache__/
