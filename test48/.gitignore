@@ -2,6 +2,8 @@
 *.log
 *.txt
 *.csv
+*.pkl
+.venv/
 *.xlsx
 *.xls
 *.doc

@@ -95,6 +95,14 @@ go run . -dtypes float32 -layers dense -modes stepbp,fastproxy,sparse -duration 
 
 Writes `test48_results.json` (gitignored).
 
+PDF report (tide / live_mnist axes — Acc, SoftAcc, Avail, AdaptPct, Score,
+MobileScore, Pareto, vs StepBP):
+
+```bash
+.venv/bin/python report.py                          # uses test48_results.json
+# first run streams the 1.5GB JSON (windows stripped → test48_flat.pkl)
+```
+
 Prints a Score-sorted table **per task × dtype**, then **vs StepBP** deltas for
 FastProxy / Sparse / HeadProxy / Linear (matched inside that dtype).
 
