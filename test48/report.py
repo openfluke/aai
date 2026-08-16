@@ -19,6 +19,7 @@ import time
 from collections import OrderedDict
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-test48")
+os.environ.setdefault("MPLBACKEND", "Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -83,6 +84,25 @@ MODE_ORDER = [
     "TweenAlt", "StepTweenAlt",
     "HeadProxy", "Linear", "FastProxy", "LinearCache", "ProxyAsync", "Sparse",
 ]
+
+MODE_ABBR = {
+    "NormalBP": "NBP", "StepBP": "SBP",
+    "Tween": "Tw", "StepTween": "STw",
+    "TweenChain": "TC", "StepTweenChain": "STC",
+    "TweenSplit": "TS", "StepTweenSplit": "STS",
+    "TweenAlt": "TA", "StepTweenAlt": "STA",
+    "HeadProxy": "HP", "Linear": "Lin",
+    "FastProxy": "FP", "LinearCache": "LC",
+    "ProxyAsync": "PA", "Sparse": "Sp",
+}
+
+ABBR_NOTE = (
+    "NBP=NormalBP  SBP=StepBP  Tw=Tween  STw=StepTween  TC=TweenChain  STC=StepTweenChain  "
+    "TS=TweenSplit  STS=StepTweenSplit  TA=TweenAlt  STA=StepTweenAlt  HP=HeadProxy  "
+    "Lin=Linear  FP=FastProxy  LC=LinearCache  PA=ProxyAsync  Sp=Sparse"
+)
+
+MAX_TABLE_ROWS = 22
 
 DTYPE_BITS = {
     "float64": 64, "float32": 32, "float16": 16, "bfloat16": 16,
@@ -395,10 +415,18 @@ def _col_widths(headers, rows):
     weights = []
     for c, h in enumerate(headers):
         hl = h.lower()
-        if h in ("#", "n") or hl in ("acc", "soft", "avail", "adapt", "tput", "score", "kib", "mobile"):
-            weights.append(max(3, min(lens[c], 7)))
-        elif hl in id_names or "winner" in hl:
-            weights.append(max(lens[c], 10) * 1.35)
+        if (
+            h in ("#", "n")
+            or len(h) <= 3
+            or hl in ("acc", "soft", "avail", "adapt", "tput", "score", "kib", "mobile")
+            or hl.endswith(" acc")
+            or hl.endswith(" score")
+            or "−bp" in hl
+            or "-bp" in hl
+        ):
+            weights.append(max(3, min(lens[c], 8)))
+        elif hl in id_names or "winner" in hl or "mode" in hl or "layer" in hl or "arch" in hl:
+            weights.append(max(lens[c], 8) * 1.25)
         else:
             weights.append(max(lens[c], 6))
     s = sum(weights) or 1
@@ -406,7 +434,8 @@ def _col_widths(headers, rows):
 
 
 def table_page(fig, headers, rows, col_w=None, y0=0.88, fontsize=6.2):
-    ax = fig.add_axes([0.025, 0.05, 0.95, y0 - 0.05])
+    # leave room for the footer so long tables cannot paint over it
+    ax = fig.add_axes([0.03, 0.075, 0.94, max(0.12, y0 - 0.085)])
     ax.axis("off")
     if not rows:
         ax.text(0.5, 0.5, "(empty)", ha="center")
@@ -420,14 +449,24 @@ def table_page(fig, headers, rows, col_w=None, y0=0.88, fontsize=6.2):
         colWidths=widths,
     )
     tbl.auto_set_font_size(False)
-    tbl.set_fontsize(fontsize)
-    tbl.scale(1, 1.28)
+    n_rows = len(rows)
+    fs = fontsize
+    rs = 1.22
+    if n_rows > 24:
+        fs = min(fs, 5.6)
+        rs = 1.10
+    if n_rows > 30:
+        fs = min(fs, 5.2)
+        rs = 1.02
+    tbl.set_fontsize(fs)
+    tbl.scale(1, rs)
     id_idx = {i for i, h in enumerate(headers) if h.lower() in {
         "cell", "winner", "layer", "mode", "dtype", "arch", "task", "#1", "#2", "#3",
+        "domain",
     }}
     for (r, c), cell in tbl.get_celld().items():
         cell.set_edgecolor("#e2e8f0")
-        cell.PAD = 0.015
+        cell.PAD = 0.012
         if c in id_idx:
             cell.get_text().set_fontfamily("DejaVu Sans Mono")
         if r == 0:
@@ -435,6 +474,22 @@ def table_page(fig, headers, rows, col_w=None, y0=0.88, fontsize=6.2):
             cell.set_text_props(color="white", fontweight="bold")
         elif r % 2 == 0:
             cell.set_facecolor("#f7fafc")
+
+
+def emit_tables(pdf, title, note, headers, rows, n_fn, fontsize=5.6):
+    """Write one or more PDF pages so long tables never paint the footer."""
+    chunks = [rows[i : i + MAX_TABLE_ROWS] for i in range(0, max(len(rows), 1), MAX_TABLE_ROWS)]
+    if not rows:
+        chunks = [[]]
+    n_chunks = len(chunks)
+    for i, chunk in enumerate(chunks):
+        page, total = n_fn()
+        suffix = f"  ({i + 1}/{n_chunks})" if n_chunks > 1 else ""
+        fig = new_page(title + suffix, note)
+        table_page(fig, headers, chunk, fontsize=fontsize)
+        footer(fig, page, total)
+        pdf.savefig(fig)
+        plt.close(fig)
 
 
 def heatmap(ax, pivot: pd.DataFrame, title: str, cmap="YlGnBu", vmin=None, vmax=None, cbar=True):
@@ -576,25 +631,38 @@ def _fmt_slot(r: pd.Series, col: str) -> str:
     return f"{r['task']} {r['dtype']} {r['layer']} {r['arch']} {r['short']}  {vs}"
 
 
-def page_topn_by_group(pdf, df, group, col, title, page, total, n=3, note="", group_order=None):
-    """One row per group: top-n cells on `col`."""
-    fig = new_page(title, note)
-    headers = [group] + [f"#{i}" for i in range(1, n + 1)]
+def page_topn_by_group(pdf, df, group, col, title, n_fn, *, top=3, note="", group_order=None):
+    """One row per group: top-n cells on `col`. Identity columns follow the grouping axis."""
+    peers = {
+        "dtype": [("task", "task"), ("layer", "layer"), ("short", "mode")],
+        "short": [("task", "task"), ("dtype", "dtype"), ("layer", "layer")],
+        "layer": [("task", "task"), ("dtype", "dtype"), ("short", "mode")],
+    }.get(group, [("task", "task"), ("dtype", "dtype"), ("layer", "layer"), ("short", "mode")])
+    label = "mode" if group == "short" else group
+    headers = [label]
+    for i in range(1, top + 1):
+        headers += [f"#{i} {hdr}" for _, hdr in peers]
+        headers.append(f"#{i} {col}")
     rows = []
     keys = group_order if group_order is not None else list(dict.fromkeys(df[group].tolist()))
     for g in keys:
         sub = df[df[group] == g]
-        top = _top_rows(sub, col, n)
-        if top.empty:
+        found = _top_rows(sub, col, top)
+        if found.empty:
             continue
-        slots = [_fmt_slot(r, col) for _, r in top.iterrows()]
-        while len(slots) < n:
-            slots.append("—")
-            rows.append([str(g)] + slots)
-    table_page(fig, headers, rows, fontsize=5.2)
-    footer(fig, page, total)
-    pdf.savefig(fig)
-    plt.close(fig)
+        slots = [str(g)]
+        shown = 0
+        for _, r in found.iterrows():
+            for src, _ in peers:
+                slots.append(str(r[src]))
+            v = r[col]
+            slots.append(f"{v:.0f}" if abs(v) >= 20 else f"{v:.1f}")
+            shown += 1
+        while shown < top:
+            slots += ["—"] * (len(peers) + 1)
+            shown += 1
+        rows.append(slots)
+    emit_tables(pdf, title, note, headers, rows, n_fn, fontsize=5.6)
 
 
 def page_task_topn(pdf, df, page, total, n=10):
@@ -847,6 +915,65 @@ def page_arch_layer(pdf, df, page, total):
     plt.close(fig)
 
 
+def _honesty_rows(df, group, delta=False):
+    modes = [m for m in MODE_ORDER if m in set(df["short"])]
+    g = df.groupby([group, "short"], observed=True)["acc"].mean().unstack()
+    if delta:
+        if "StepBP" not in g.columns:
+            return [group], []
+        bp = g["StepBP"]
+        g = g.sub(bp, axis=0)
+        modes = [m for m in modes if m != "StepBP" and m in g.columns]
+    else:
+        modes = [m for m in modes if m in g.columns]
+    headers = [group] + [MODE_ABBR.get(m, m) for m in modes]
+    keys = list(dict.fromkeys(df[group].tolist()))
+    rows = []
+    for k in keys:
+        row = [str(k)]
+        for m in modes:
+            if k in g.index and m in g.columns and pd.notna(g.loc[k, m]):
+                v = float(g.loc[k, m])
+                row.append(f"{v:+.1f}" if delta else f"{v:.1f}")
+            else:
+                row.append("—")
+        rows.append(row)
+    return headers, rows
+
+
+def page_honesty_matrix(pdf, df, group, title, n_fn, note="", delta=False):
+    """Mean Acc (or AccΔ vs StepBP) of every training mode on every layer or dtype."""
+    headers, rows = _honesty_rows(df, group, delta=delta)
+    emit_tables(pdf, title, note or ABBR_NOTE, headers, rows, n_fn, fontsize=5.3)
+
+
+def page_honesty_delta_heat(pdf, vs, n_fn):
+    """AccΔ vs StepBP for every non-BP mode × every layer and every dtype, per task."""
+    modes = [m for m in MODE_ORDER if m != "StepBP"]
+    specs = [
+        ("layer", "Honesty — AccΔ vs StepBP, every mode × every layer",
+         "Matched cells. Green = beats backprop Acc. XOR is a 50/75/100 lottery."),
+        ("dtype", "Honesty — AccΔ vs StepBP, every mode × every dtype",
+         "Same matched cells, grouped by weight storage. Learning claim, not Score."),
+    ]
+    tasks = [t for t in ("xor", "sine", "copy") if t in set(vs["task"])]
+    for grp, title, note in specs:
+        page, total = n_fn()
+        fig = new_page(title, note)
+        for i, task in enumerate(tasks):
+            ax = fig.add_subplot(1, len(tasks), i + 1)
+            sub = vs[vs["task"] == task]
+            pv = sub.pivot_table(index=grp, columns="short", values="d_acc", aggfunc="mean")
+            cols = [m for m in modes if m in pv.columns]
+            pv = pv.reindex(columns=cols)
+            pv.columns = [MODE_ABBR.get(c, c) for c in pv.columns]
+            heatmap(ax, pv, task, cmap="RdYlGn", vmin=-15, vmax=15, cbar=(i == len(tasks) - 1))
+        fig.tight_layout(rect=[0.02, 0.04, 0.99, 0.92])
+        footer(fig, page, total)
+        pdf.savefig(fig)
+        plt.close(fig)
+
+
 def page_honesty(pdf, df, vs, page, total):
     fig = new_page("Honesty checks", "If Score and Acc disagree, Acc is the learning claim.")
     sine = df[df["task"] == "sine"]
@@ -919,8 +1046,7 @@ def page_winners_cross(pdf, df, page, total):
     plt.close(fig)
 
 
-def page_best_mode_per_dtype(pdf, df, page, total):
-    fig = new_page("Best mode per dtype (by Score)", "Usually Sparse. That is Avail, not Acc.")
+def page_best_mode_per_dtype(pdf, df, n_fn):
     rows = []
     headers = ["dtype", "mode", "task", "layer", "arch", "acc", "score"]
     for dt, sub in df.groupby("dtype", observed=True, sort=False):
@@ -928,14 +1054,11 @@ def page_best_mode_per_dtype(pdf, df, page, total):
         if r is None:
             continue
         rows.append([dt, r["short"], r["task"], r["layer"], r["arch"], f"{r['acc']:.1f}", f"{r['score']:.0f}"])
-    table_page(fig, headers, rows)
-    footer(fig, page, total)
-    pdf.savefig(fig)
-    plt.close(fig)
+    emit_tables(pdf, "Best mode per dtype (by Score)", "Usually Sparse. That is Avail, not Acc.",
+                headers, rows, n_fn)
 
 
-def page_best_acc_mode_per_dtype(pdf, df, page, total):
-    fig = new_page("Best mode per dtype (by hard Acc)", "This is the learning ranking. Compare to the Score page.")
+def page_best_acc_mode_per_dtype(pdf, df, n_fn):
     rows = []
     headers = ["dtype", "mode", "task", "layer", "arch", "acc", "soft", "score"]
     for dt, sub in df.groupby("dtype", observed=True, sort=False):
@@ -943,10 +1066,9 @@ def page_best_acc_mode_per_dtype(pdf, df, page, total):
         if r is None:
             continue
         rows.append([dt, r["short"], r["task"], r["layer"], r["arch"], f"{r['acc']:.1f}", f"{r['soft']:.1f}", f"{r['score']:.0f}"])
-    table_page(fig, headers, rows)
-    footer(fig, page, total)
-    pdf.savefig(fig)
-    plt.close(fig)
+    emit_tables(pdf, "Best mode per dtype (by hard Acc)",
+                "This is the learning ranking. Compare to the Score page.",
+                headers, rows, n_fn)
 
 
 def page_scatter_headline(pdf, df, page, total):
@@ -1061,7 +1183,7 @@ def main():
     learned = dfo[dfo["acc"] >= 70]
     sine = dfo[dfo["task"] == "sine"]
 
-    planned = 36
+    planned = 51
     page = 0
 
     print(f"writing {out_path} …", flush=True)
@@ -1157,22 +1279,22 @@ def main():
         page_winners_cross(pdf, dfo, *n())
         dtype_order = list(dict.fromkeys(dfo["dtype"].tolist()))
         page_topn_by_group(pdf, dfo, "dtype", "acc", "Top 3 Acc per dtype (all modes × layers × tasks)",
-                           *n(), n=3, group_order=dtype_order,
+                           n, top=3, group_order=dtype_order,
                            note="Every numerical type. #1/#2/#3 can be different modes.")
         page_topn_by_group(pdf, dfo, "dtype", "score", "Top 3 Score per dtype (all modes × layers × tasks)",
-                           *n(), n=3, group_order=dtype_order,
+                           n, top=3, group_order=dtype_order,
                            note="Duty clock per storage type. Usually Sparse.")
         page_topn_by_group(pdf, dfo, "short", "acc", "Top 3 Acc per training mode (all dtypes × layers × tasks)",
-                           *n(), n=3, group_order=MODE_ORDER,
+                           n, top=3, group_order=MODE_ORDER,
                            note="Every train mode. Winner cell includes dtype.")
         page_topn_by_group(pdf, dfo, "short", "score", "Top 3 Score per training mode (all dtypes × layers × tasks)",
-                           *n(), n=3, group_order=MODE_ORDER)
+                           n, top=3, group_order=MODE_ORDER)
         page_topn_by_group(pdf, dfo, "layer", "acc", "Top 3 Acc per layer kind",
-                           *n(), n=3, note="Best dtype/mode/arch for each mid Op.")
+                           n, top=3, note="Best dtype/mode for each mid Op.")
         page_topn_by_group(pdf, dfo, "layer", "score", "Top 3 Score per layer kind",
-                           *n(), n=3)
-        page_best_mode_per_dtype(pdf, dfo, *n())
-        page_best_acc_mode_per_dtype(pdf, dfo, *n())
+                           n, top=3)
+        page_best_mode_per_dtype(pdf, dfo, n)
+        page_best_acc_mode_per_dtype(pdf, dfo, n)
         page_mode_bars(pdf, dfo, *n())
         page_heat_dtype_mode(pdf, dfo, *n())
         page_heat_layer_mode(pdf, dfo, *n())
@@ -1182,6 +1304,40 @@ def main():
         page_vs_bp_bars(pdf, vs, *n())
         page_dtype_rank(pdf, dfo, *n())
         page_arch_layer(pdf, dfo, *n())
+        page_honesty_matrix(
+            pdf, dfo, "layer",
+            "Honesty — mean Acc of every mode on every layer (all tasks)",
+            n, note="All dtypes pooled. " + ABBR_NOTE,
+        )
+        page_honesty_matrix(
+            pdf, dfo, "dtype",
+            "Honesty — mean Acc of every mode on every dtype (all tasks)",
+            n, note="All layers pooled. " + ABBR_NOTE,
+        )
+        if len(sine):
+            page_honesty_matrix(
+                pdf, sine, "layer",
+                "Honesty — sine Acc, every mode × every layer",
+                n, note="Learning board. XOR lottery stripped. " + ABBR_NOTE,
+            )
+            page_honesty_matrix(
+                pdf, sine, "dtype",
+                "Honesty — sine Acc, every mode × every dtype",
+                n, note="Learning board. Same weight storage, every train mode. " + ABBR_NOTE,
+            )
+            page_honesty_matrix(
+                pdf, sine, "layer",
+                "Honesty — sine AccΔ vs StepBP, every mode × every layer",
+                n, delta=True,
+                note="Green-ish positive = beats backprop Acc on that mid Op. " + ABBR_NOTE,
+            )
+            page_honesty_matrix(
+                pdf, sine, "dtype",
+                "Honesty — sine AccΔ vs StepBP, every mode × every dtype",
+                n, delta=True,
+                note="Positive = beats StepBP Acc on that storage type. " + ABBR_NOTE,
+            )
+        page_honesty_delta_heat(pdf, vs, n)
         page_honesty(pdf, dfo, vs, *n())
 
         d = pdf.infodict()
