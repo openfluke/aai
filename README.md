@@ -37,7 +37,30 @@ We are looking for an architecture that **owns its own perception of time**. Tru
 
 That is the **synthetic organism** metric. Lucy Score is live-fit: can the net **learn while it still talks**. Lucy density (LPD) is whether that live-fit survives memory compression. Gold is the trifecta (Acc + Thru + Avail) in ≤20% of the Acc-champ’s RAM.
 
-Proxy gradients (FastProxy, Sparse, Split, …) exist because global backprop’s memory footprint is hostile to that loop. The Pi grid searches were thermodynamic proof, not a speed-hack contest. `MeshTweenSplitSparse` was one configuration that kept sequence Acc while cutting duty-cycle cost. That is a starting recipe, not “Sparse is better backprop.”
+Proxy gradients (FastProxy, Sparse, Split, …) exist because global backprop is a bad **duty-cycle** default on a live loop. The Pi grids and `MeshTweenSplitSparse` were thermodynamic probes. The **receipt** is [`adaptv2`](adaptv2): Dense chase→avoid→chase, 22 stack-local modes.
+
+---
+
+## The proof — adaptv2 (Dense live-loop)
+
+This is why the lab exists. Same 6-layer Dense (`8→32→64→64→64→32→4`), 15s, workers=1, serve then train every sample, shock at 5s and 10s (`label+2 mod 4`). Full tables: [`adaptv2/README.md`](adaptv2/README.md).
+
+**CPU (`go run .`, SIMD off)** — organism board. Tide is SIMD-only; this host defaults CPU so Avail is honest against the old loom menu.
+
+| | Acc | Avail | Thru | Score | Shock |
+|--|----:|------:|-----:|------:|-------|
+| NormalBP | 89.2 | 63.7% | 1762 | 1001 | 90→87, barely dips |
+| StepBP | 89.4 | **9.8%** | 2181 | 192 | same Acc, serve dead |
+| **FastProxy** | **91.2** | **82.7%** | 3492 | 2634 | 94→81, Acc champ |
+| **Sparse** | 85.9 | **95.5%** | **7613** | **6241** | 87→82 / 87→87, LPD / Q / gold-std |
+| Tween | 46.9 | 20% | 1632 | 154 | 69→**9%** on avoid — control |
+| LinearCache | 43.8 | 82.5% | 3484 | 1259 | high Score, dead Acc — trap |
+
+BP **learns**. StepBP **does not run+train** in the Lucy sense (Avail 10%). FastProxy **beats BP Acc** and stays ~83% available. Sparse is not a better Jacobian — it is the synthetic organism (skip-GEMV Avail). Tween / LinearCache / HeadProxyAsync stay graveyard-shaped.
+
+**SIMD (`go run . -simd on`)** — all 22 modes run; Thru ~2× (Sparse ~3×, 17k). Acc ticks up (StepTweenChain **92.5**). Availability **collapses** (NormalBP 64%→**6%**, FastProxy 83%→**8%**) because cheap MatVec lets train own the thread. Sparse still wins LPD (Avail **31%**, Score 4611). Do not quote the SIMD Acc champ as live-fit.
+
+**Do not paste this ranking onto MHA.** `live_gpt` is Embedding → residual causal MHA → vocab CE. FastProxy’s `W_headᵀ` is the LM Dense, not credit through attention. Same mode names, different store — Shakespeare Acc stays BP-family; this Dense table is the proof of *need*, not a universal winner.
 
 ---
 
@@ -264,9 +287,9 @@ Each folder is its own Go module (`replace` → Welvet). JSON results are gitign
 | [`test47`](test47) | Tween vs Split vs Alt on xor / sine / copy × every layer kind. |
 | [`test48`](test48) | Credit modes × **every layer** × xor/sine/copy × 34 dtypes. Combinatorial sweep. |
 | [`test50`](test50) | Deep **FP32** Lucy **mode race**: all named modes × Dense/Bi/Tri × 1³/2³/3³ origin-only. Rival = Acc vs StepBP. |
-| [`adaptv2`](adaptv2) | Loom Lucy Bloom Rivers **[2]**: Dense `8→32→64→64→64→32→4`, chase→avoid→chase, stack-local modes, **LPD** board. |
+| [`adaptv2`](adaptv2) | **The proof.** Loom **[2]** Dense chase→avoid→chase, 22 stack-local modes, LPD. CPU: FastProxy Acc champ, Sparse organism, StepBP Avail 9.8%. SIMD: Thru up, Avail dies except Sparse. |
 
-test48 answers “does FastProxy/Sparse even work on CNN/Mamba/…”. test50 answers “who wins a timed race on the sandwich the modes were designed for.” adaptv2 answers “does the dense mid-stream organism still live after Step\* credit.”
+test48 answers “does FastProxy/Sparse even work on CNN/Mamba/…”. test50 answers “who wins a timed race on the sandwich the modes were designed for.” **adaptv2 is why the other benches exist** — Dense live-fit first, then ask whether the same names survive another layer kind.
 
 ### ARC-AGI (harder world)
 
@@ -328,8 +351,8 @@ The organism we want is **gold**: Acc, throughput, and availability all ≥80% o
 
 ```bash
 cd welvet/apps/aai/adaptv2
-go run .                         # 15s chase/avoid, every stack-local mode
-go run . -modes loom -simd both  # original six poly paths
+go run .              # CPU proof board (default -simd off)
+go run . -simd on     # SIMD: faster, Avail tanks except Sparse
 
 cd ../test50
 go run . -grids 1 -duration 1s   # FP32 mode race, 1³ only
