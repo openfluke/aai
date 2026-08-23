@@ -25,7 +25,7 @@ So you no longer wait for every `lr=0.02` across all modes before seeing higher 
 cd apps/aai/test51
 go test .
 go run .                    # FULL matrix: all modes × all layers × all dtypes × all challenges × funny LR × cams 1–3 × grids 1³–3³
-# open http://127.0.0.1:5151 → Start
+# open http://<host-ip>:5151 → Start
 ```
 
 That is ~**1.4M** jobs (~20k trees × 72 leaves). Resume skips done IDs. To shrink:
@@ -49,7 +49,7 @@ go run . -modes NormalBP -challenges chase -lrs 0.02,2
 | `-permute` | false | force full matrix (same as defaults) |
 | `-duration` / `-after-freeze` / `-after-train` | `3s` / `2s` / `3s` | phase walls |
 | `-ckpt` | `test51_ckpt` | progress + history + results (saved every leaf; `-resume` default skips done IDs) |
-| `-addr` | `:5151` | dash (`""` disables) |
+| `-addr` | `0.0.0.0:5151` | dash on all interfaces (`""` disables) |
 
 ## Dashboard
 

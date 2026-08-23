@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"net"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -179,7 +181,7 @@ func main() {
 	gridsFlag := flag.String("grids", "1-3", "mesh cube edge: 1|1,2,3|1x1x1,3x3x3|1-3|all")
 	permute := flag.Bool("permute", false, "force full matrix (same as current defaults: layers=all dtypes=all …)")
 	seed := flag.Int64("seed", 1, "rng seed")
-	addr := flag.String("addr", ":5151", "dash listen address (empty = no dash)")
+	addr := flag.String("addr", "0.0.0.0:5151", "dash listen (0.0.0.0:5151 = all interfaces; empty = no dash)")
 	game := flag.String("game", "", "empty/mock = Go challenges; ls20 = Python ARC-AGI-3 bridge")
 	bridgePy := flag.String("bridge", "", "path to agent_bridge.py (default bridge/agent_bridge.py)")
 	outJSON := flag.String("json", "", "legacy single-file dump (empty = skip; store always writes results.json)")
@@ -287,13 +289,15 @@ func main() {
 
 	var dash *dashServer
 	if strings.TrimSpace(*addr) != "" {
-		dash = newDashServer(*addr, hub)
+		listen := normalizeDashAddr(*addr)
+		dash = newDashServer(listen, hub)
 		go func() {
 			if err := dash.listen(); err != nil {
 				fmt.Fprintf(os.Stderr, "dash: %v\n", err)
 			}
 		}()
-		fmt.Printf("dash http://127.0.0.1%s  (Start to begin)\n", *addr)
+		port := dashPort(listen)
+		fmt.Printf("dash listening on %s  →  http://<this-host-ip>:%s  (all interfaces, Start to begin)\n", listen, port)
 		if !*autoStart {
 			dash.awaitStart()
 		} else {
@@ -583,6 +587,39 @@ func stripWeights(r modeResult) modeResult {
 	r.Weights = nil
 	r.Lucy.Windows = nil
 	return r
+}
+
+func normalizeDashAddr(spec string) string {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return ""
+	}
+	// ":5151" or bare port → bind all interfaces (remote LAN access).
+	if strings.HasPrefix(spec, ":") {
+		return "0.0.0.0" + spec
+	}
+	host, port, err := net.SplitHostPort(spec)
+	if err != nil {
+		// bare "5151"
+		if _, e := strconv.Atoi(spec); e == nil {
+			return "0.0.0.0:" + spec
+		}
+		return spec
+	}
+	if host == "" || host == "localhost" {
+		return "0.0.0.0:" + port
+	}
+	return spec
+}
+
+func dashPort(listen string) string {
+	if listen == "" {
+		return "5151"
+	}
+	if i := strings.LastIndex(listen, ":"); i >= 0 && i < len(listen)-1 {
+		return listen[i+1:]
+	}
+	return listen
 }
 
 func shortID(id string) string {
