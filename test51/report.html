@@ -43,9 +43,14 @@
     }
     .chip.hot { border-color: #3dd6c688; color: var(--accent); }
     .stats {
-      display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 1rem;
+      display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.75rem; margin-bottom: 1rem;
     }
-    @media (max-width: 800px) { .stats { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 1000px) { .stats { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 600px) { .stats { grid-template-columns: 1fr 1fr; } }
+    .section-title {
+      color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+      margin: 1.25rem 0 0.5rem;
+    }
     .stat {
       background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
       padding: 0.85rem 1rem;
@@ -99,33 +104,62 @@
     <div class="chips" id="chips"></div>
     <div class="stats" id="stats"></div>
 
+    <div class="section-title">Lucy pillars · avg by learning rate</div>
     <div class="charts">
       <section class="panel">
-        <h3>Accuracy by learning rate</h3>
-        <div class="body"><canvas class="chart" id="accLR" width="560" height="240"></canvas></div>
+        <h3>Accuracy</h3>
+        <div class="body"><canvas class="chart" id="accLR" width="560" height="220"></canvas></div>
       </section>
       <section class="panel">
-        <h3>Score by learning rate</h3>
-        <div class="body"><canvas class="chart" id="scoreLR" width="560" height="240"></canvas></div>
+        <h3>Score · Thru × Avail × Acc</h3>
+        <div class="body"><canvas class="chart" id="scoreLR" width="560" height="220"></canvas></div>
       </section>
       <section class="panel">
-        <h3>Δacc (self-improve) by leaf</h3>
-        <div class="body"><canvas class="chart" id="deltaBars" width="560" height="240"></canvas></div>
+        <h3>Throughput</h3>
+        <div class="body"><canvas class="chart" id="thruLR" width="560" height="220"></canvas></div>
       </section>
       <section class="panel">
-        <h3>Score heatmap · cams × grid</h3>
-        <div class="body"><canvas class="chart" id="heat" width="560" height="240"></canvas></div>
+        <h3>Availability</h3>
+        <div class="body"><canvas class="chart" id="availLR" width="560" height="220"></canvas></div>
+      </section>
+    </div>
+
+    <div class="section-title">Heatmaps · cam × grid (avg per cell)</div>
+    <div class="charts">
+      <section class="panel">
+        <h3>Acc heatmap</h3>
+        <div class="body"><canvas class="chart" id="heatAcc" width="560" height="220"></canvas></div>
+      </section>
+      <section class="panel">
+        <h3>Score heatmap</h3>
+        <div class="body"><canvas class="chart" id="heatScore" width="560" height="220"></canvas></div>
+      </section>
+      <section class="panel">
+        <h3>Throughput heatmap</h3>
+        <div class="body"><canvas class="chart" id="heatThru" width="560" height="220"></canvas></div>
+      </section>
+      <section class="panel">
+        <h3>Availability heatmap</h3>
+        <div class="body"><canvas class="chart" id="heatAvail" width="560" height="220"></canvas></div>
+      </section>
+    </div>
+
+    <div class="section-title">Self-improve</div>
+    <div class="charts">
+      <section class="panel">
+        <h3>Δacc by leaf</h3>
+        <div class="body"><canvas class="chart" id="deltaBars" width="560" height="220"></canvas></div>
       </section>
     </div>
 
     <section class="panel">
-      <h3>All leaves · sorted by score</h3>
+      <h3>All leaves · sorted by score (Lucy pillars)</h3>
       <div class="table-scroll">
         <table>
           <thead>
             <tr>
               <th>#</th><th>LR</th><th>Cam</th><th>Grid</th>
-              <th>Acc</th><th>Soft</th><th>Score</th><th>Avail</th>
+              <th>Acc</th><th>Soft</th><th>Score</th><th>Thru</th><th>Avail</th>
               <th>Δacc</th><th>Δ%</th><th>RAM</th><th>Levels</th>
             </tr>
           </thead>
@@ -208,7 +242,7 @@
       });
     }
 
-    function drawHeat(canvas, rows) {
+    function drawHeat(canvas, rows, valFn, hue, fmtVal) {
       const ctx = canvas.getContext("2d");
       const W = canvas.width, H = canvas.height;
       ctx.fillStyle = "#0b1016";
@@ -217,12 +251,12 @@
       const grids = [...new Set(rows.map((r) => r.grid_n || 1))].sort((a, b) => a - b);
       if (!cams.length || !grids.length) return;
       const cell = {};
-      let max = 1;
+      let max = 1e-9;
       for (const r of rows) {
         if (r.error) continue;
         const k = `${r.cams || 1}|${r.grid_n || 1}`;
         const cur = cell[k] || { sum: 0, n: 0 };
-        cur.sum += r.score || 0; cur.n++;
+        cur.sum += valFn(r) || 0; cur.n++;
         cell[k] = cur;
         max = Math.max(max, cur.sum / cur.n);
       }
@@ -237,13 +271,20 @@
         grids.forEach((g, xi) => {
           const cur = cell[`${c}|${g}`];
           const v = cur ? cur.sum / cur.n : 0;
-          const t = v / max;
-          ctx.fillStyle = `rgba(61,214,198,${0.12 + 0.85 * t})`;
+          const t = max > 0 ? v / max : 0;
+          ctx.fillStyle = `hsla(${hue}, 65%, 50%, ${0.12 + 0.85 * t})`;
           ctx.fillRect(pad.l + xi * cw + 2, pad.t + yi * ch + 2, cw - 4, ch - 4);
           ctx.fillStyle = "#e8eef5";
-          ctx.fillText(v ? v.toFixed(0) : "—", pad.l + xi * cw + cw / 2 - 12, pad.t + yi * ch + ch / 2 + 4);
+          const txt = v ? fmtVal(v) : "—";
+          ctx.fillText(txt, pad.l + xi * cw + cw / 2 - 14, pad.t + yi * ch + ch / 2 + 4);
         });
       });
+    }
+
+    function bestLeafRow(rep, rows) {
+      return rows.find((r) => r.id === rep.best_id) ||
+        rows.find((r) => r.lr === rep.best_lr && r.cams === rep.best_cams && r.grid_n === rep.best_grid) ||
+        rows[0];
     }
 
     function render(rep) {
@@ -251,6 +292,11 @@
       $("subtitle").textContent =
         `${rep.mode} · ${rep.layer}/${rep.dtype} · ${rep.challenge} · ${rep.leaves} leaves · finished ${rep.finished || "—"}`;
       $("pdfBtn").href = `/report/${rep.index}.pdf`;
+
+      const rows = (rep.rows || []).slice().sort((a, b) => (b.score || 0) - (a.score || 0));
+      const ok = rows.filter((r) => !r.error);
+      const best = bestLeafRow(rep, ok);
+
       $("chips").innerHTML = `
         <span class="chip hot">${rep.mode}</span>
         <span class="chip">${rep.layer}</span>
@@ -258,18 +304,19 @@
         <span class="chip">${rep.challenge}</span>
         <span class="chip">best ${rep.best_id || "—"}</span>`;
       $("stats").innerHTML = `
-        <div class="stat"><div class="k">Best Acc</div><div class="v">${fmt(rep.best_acc)}</div></div>
         <div class="stat"><div class="k">Best Score</div><div class="v">${fmt(rep.best_score, 0)}</div></div>
+        <div class="stat"><div class="k">Best Acc</div><div class="v">${fmt(rep.best_acc)}</div></div>
+        <div class="stat"><div class="k">Best Thru</div><div class="v">${fmt(best?.throughput, 1)}</div></div>
+        <div class="stat"><div class="k">Best Avail</div><div class="v">${fmt(best?.availability)}%</div></div>
         <div class="stat"><div class="k">Best Δacc</div><div class="v">${fmt(rep.best_acc_delta)}</div></div>
-        <div class="stat"><div class="k">Best leaf</div><div class="v" style="font-size:0.95rem">
+        <div class="stat"><div class="k">Best leaf</div><div class="v" style="font-size:0.85rem">
           lr ${fmt(rep.best_lr, rep.best_lr >= 100 ? 0 : 2)} · cam ${rep.best_cams} · ${rep.best_grid}³
         </div></div>`;
 
-      const rows = (rep.rows || []).slice().sort((a, b) => (b.score || 0) - (a.score || 0));
       $("rows").innerHTML = rows.map((r, i) => {
-        const best = r.id === rep.best_id ||
+        const isBest = r.id === rep.best_id ||
           (r.lr === rep.best_lr && r.cams === rep.best_cams && r.grid_n === rep.best_grid);
-        return `<tr class="${best ? "best" : ""}">
+        return `<tr class="${isBest ? "best" : ""}">
           <td>${i + 1}</td>
           <td>${fmt(r.lr, r.lr >= 100 ? 0 : 2)}</td>
           <td>${r.cams ?? "—"}</td>
@@ -277,27 +324,33 @@
           <td>${fmt(r.acc)}</td>
           <td>${fmt(r.soft_acc)}</td>
           <td>${fmt(r.score, 0)}</td>
+          <td>${fmt(r.throughput, 1)}</td>
           <td>${fmt(r.availability)}</td>
           <td>${delta(r.acc_delta)}</td>
           <td>${delta(r.improve_pct)}</td>
           <td>${fmt(r.ram_kib, 0)}</td>
           <td>${r.levels ?? 0}</td>
         </tr>`;
-      }).join("") || `<tr><td colspan="12" class="err">No leaf rows stored for this report.</td></tr>`;
+      }).join("") || `<tr><td colspan="13" class="err">No leaf rows stored for this report.</td></tr>`;
 
-      const ok = rows.filter((r) => !r.error);
       drawBars($("accLR"), avgBy(ok, (r) => r.lr, (r) => r.acc || 0), "#3dd6c6", "acc");
       drawBars($("scoreLR"), avgBy(ok, (r) => r.lr, (r) => r.score || 0), "#6bcf7f", "score");
+      drawBars($("thruLR"), avgBy(ok, (r) => r.lr, (r) => r.throughput || 0), "#7eb8ff", "thru");
+      drawBars($("availLR"), avgBy(ok, (r) => r.lr, (r) => r.availability || 0), "#c49bff", "avail%");
+
+      drawHeat($("heatAcc"), ok, (r) => r.acc, 175, (v) => v.toFixed(1));
+      drawHeat($("heatScore"), ok, (r) => r.score, 130, (v) => v.toFixed(0));
+      drawHeat($("heatThru"), ok, (r) => r.throughput, 210, (v) => v.toFixed(1));
+      drawHeat($("heatAvail"), ok, (r) => r.availability, 270, (v) => v.toFixed(1));
+
       const deltas = ok.map((r, i) => ({
         k: `${r.cams}c/${r.grid_n}³`,
         v: r.acc_delta || 0,
         i,
       }));
-      // keep chart readable: top 24 by |Δ|
       const shown = deltas.slice().sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).slice(0, 24)
         .sort((a, b) => a.i - b.i);
       drawBars($("deltaBars"), shown.map((d) => ({ k: d.k, v: d.v })), "#e0b44e", "Δacc");
-      drawHeat($("heat"), ok);
     }
 
     async function main() {

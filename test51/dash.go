@@ -29,6 +29,7 @@ type leafRow struct {
 	Acc     float64 `json:"acc"`
 	Soft    float64 `json:"soft_acc"`
 	Avail   float64 `json:"availability"`
+	Thru    float64 `json:"throughput"`
 	Score   float64 `json:"score"`
 	RAMKiB  float64 `json:"ram_kib"`
 	Levels  int     `json:"levels"`
@@ -247,6 +248,7 @@ func (h *liveHub) pulseLeaf(r modeResult) {
 		h.board[i].Acc = r.Acc
 		h.board[i].Soft = r.Soft
 		h.board[i].Avail = r.Avail
+		h.board[i].Thru = r.Thru
 		h.board[i].Score = r.Score
 		h.board[i].RAMKiB = r.RAMKiB
 		h.board[i].Levels = r.Levels
@@ -274,6 +276,7 @@ func (h *liveHub) finishLeaf(r modeResult) {
 		h.board[i].Acc = r.Acc
 		h.board[i].Soft = r.Soft
 		h.board[i].Avail = r.Avail
+		h.board[i].Thru = r.Thru
 		h.board[i].Score = r.Score
 		h.board[i].RAMKiB = r.RAMKiB
 		h.board[i].Levels = r.Levels

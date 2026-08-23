@@ -78,7 +78,7 @@ func summarizeTree(t Tree, leaves []modeResult) treeReport {
 	for _, r := range leaves {
 		row := leafRow{
 			ID: r.ID, LR: r.LR, Cams: r.Cams, GridN: r.GridN, Phase: r.Phase,
-			Acc: r.Acc, Soft: r.Soft, Avail: r.Avail, Score: r.Score, RAMKiB: r.RAMKiB,
+			Acc: r.Acc, Soft: r.Soft, Avail: r.Avail, Thru: r.Thru, Score: r.Score, RAMKiB: r.RAMKiB,
 			Levels: r.Levels, AccΔ: r.AccDelta, Improve: r.ImprovePct, Done: true, Err: r.Err,
 		}
 		rep.Rows = append(rep.Rows, row)
