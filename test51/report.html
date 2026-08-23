@@ -60,7 +60,11 @@
     .charts {
       display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;
     }
-    @media (max-width: 900px) { .charts { grid-template-columns: 1fr; } }
+    .charts.three { grid-template-columns: repeat(3, 1fr); }
+    @media (max-width: 900px) { .charts.three { grid-template-columns: 1fr; } }
+    .matrix td, .matrix th { text-align: center; font-family: var(--mono); font-size: 11px; }
+    .matrix th.row-h { text-align: left; }
+    .matrix .cell-best { background: #1e3a3a88; color: var(--accent); }
     .panel {
       background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
     }
@@ -121,6 +125,56 @@
       <section class="panel">
         <h3>Availability</h3>
         <div class="body"><canvas class="chart" id="availLR" width="560" height="220"></canvas></div>
+      </section>
+    </div>
+
+    <div class="section-title">Cam × grid · Acc / Thru / Avail (avg across LR)</div>
+    <section class="panel" style="margin-bottom:1rem">
+      <h3>Lucy pillars by camera &amp; mesh size</h3>
+      <div class="table-scroll">
+        <table class="matrix" id="camGridMatrix">
+          <thead>
+            <tr>
+              <th class="row-h">cam ↓ grid →</th>
+              <th>1³ · Acc / Thru / Avail</th>
+              <th>2³ · Acc / Thru / Avail</th>
+              <th>3³ · Acc / Thru / Avail</th>
+            </tr>
+          </thead>
+          <tbody id="camGridBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="section-title">By camera · avg across LR &amp; grid</div>
+    <div class="charts three">
+      <section class="panel">
+        <h3>Acc · cam 1–3</h3>
+        <div class="body"><canvas class="chart" id="accCam" width="360" height="200"></canvas></div>
+      </section>
+      <section class="panel">
+        <h3>Thru · cam 1–3</h3>
+        <div class="body"><canvas class="chart" id="thruCam" width="360" height="200"></canvas></div>
+      </section>
+      <section class="panel">
+        <h3>Avail · cam 1–3</h3>
+        <div class="body"><canvas class="chart" id="availCam" width="360" height="200"></canvas></div>
+      </section>
+    </div>
+
+    <div class="section-title">By grid · avg across LR &amp; cam</div>
+    <div class="charts three">
+      <section class="panel">
+        <h3>Acc · 1³–3³</h3>
+        <div class="body"><canvas class="chart" id="accGrid" width="360" height="200"></canvas></div>
+      </section>
+      <section class="panel">
+        <h3>Thru · 1³–3³</h3>
+        <div class="body"><canvas class="chart" id="thruGrid" width="360" height="200"></canvas></div>
+      </section>
+      <section class="panel">
+        <h3>Avail · 1³–3³</h3>
+        <div class="body"><canvas class="chart" id="availGrid" width="360" height="200"></canvas></div>
       </section>
     </div>
 
@@ -191,7 +245,65 @@
         cur.sum += valFn(r); cur.n++;
         m.set(k, cur);
       }
-      return [...m.entries()].map(([k, v]) => ({ k, v: v.sum / v.n })).sort((a, b) => a.k - b.k);
+      return [...m.entries()].map(([k, v]) => ({ k, v: v.sum / v.n })).sort((a, b) => {
+        const na = +a.k, nb = +b.k;
+        if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+        return String(a.k).localeCompare(String(b.k));
+      });
+    }
+
+    const CAMS = [1, 2, 3];
+    const GRIDS = [1, 2, 3];
+
+    function cellAvg(rows, cam, grid) {
+      let sumA = 0, sumT = 0, sumV = 0, sumS = 0, n = 0;
+      for (const r of rows) {
+        if (r.error) continue;
+        if ((r.cams || 1) !== cam || (r.grid_n || 1) !== grid) continue;
+        sumA += r.acc || 0;
+        sumT += r.throughput || 0;
+        sumV += r.availability || 0;
+        sumS += r.score || 0;
+        n++;
+      }
+      if (!n) return null;
+      return { acc: sumA / n, thru: sumT / n, avail: sumV / n, score: sumS / n, n };
+    }
+
+    function renderCamGridMatrix(rows, best) {
+      const body = $("camGridBody");
+      let bestScore = -1;
+      const cells = [];
+      for (const cam of CAMS) {
+        for (const grid of GRIDS) {
+          const c = cellAvg(rows, cam, grid);
+          if (c && c.score > bestScore) bestScore = c.score;
+          cells.push({ cam, grid, c });
+        }
+      }
+      body.innerHTML = CAMS.map((cam) => {
+        const tds = GRIDS.map((grid) => {
+          const c = cellAvg(rows, cam, grid);
+          if (!c) return `<td>—</td>`;
+          const isBest = best && cam === best.best_cams && grid === best.best_grid;
+          const hot = c.score >= bestScore * 0.98 && bestScore > 0;
+          return `<td class="${isBest || hot ? "cell-best" : ""}">
+            <div>${fmt(c.acc)} / ${fmt(c.thru, 0)} / ${fmt(c.avail)}%</div>
+            <div style="color:var(--muted);font-size:10px">score ${fmt(c.score, 0)} · n=${c.n}</div>
+          </td>`;
+        }).join("");
+        return `<tr><th class="row-h">cam ${cam}</th>${tds}</tr>`;
+      }).join("");
+    }
+
+    function drawBarsLabel(canvas, points, color, yLabel) {
+      const labeled = points.map((p) => ({
+        k: typeof p.k === "number" && p.k >= 1 && p.k <= 3 && String(p.k).indexOf("³") < 0
+          ? (String(p.label || p.k).includes("³") ? `${p.k}³` : `cam ${p.k}`)
+          : (p.label || p.k),
+        v: p.v,
+      }));
+      drawBars(canvas, labeled, color, yLabel);
     }
 
     function drawAxes(ctx, W, H, pad) {
@@ -247,9 +359,8 @@
       const W = canvas.width, H = canvas.height;
       ctx.fillStyle = "#0b1016";
       ctx.fillRect(0, 0, W, H);
-      const cams = [...new Set(rows.map((r) => r.cams || 1))].sort((a, b) => a - b);
-      const grids = [...new Set(rows.map((r) => r.grid_n || 1))].sort((a, b) => a - b);
-      if (!cams.length || !grids.length) return;
+      const cams = CAMS;
+      const grids = GRIDS;
       const cell = {};
       let max = 1e-9;
       for (const r of rows) {
@@ -337,6 +448,24 @@
       drawBars($("scoreLR"), avgBy(ok, (r) => r.lr, (r) => r.score || 0), "#6bcf7f", "score");
       drawBars($("thruLR"), avgBy(ok, (r) => r.lr, (r) => r.throughput || 0), "#7eb8ff", "thru");
       drawBars($("availLR"), avgBy(ok, (r) => r.lr, (r) => r.availability || 0), "#c49bff", "avail%");
+
+      renderCamGridMatrix(ok, rep);
+
+      const byCam = (fn) => CAMS.map((c) => {
+        const pts = ok.filter((r) => (r.cams || 1) === c);
+        return { k: c, v: pts.reduce((s, r) => s + fn(r), 0) / (pts.length || 1) };
+      });
+      const byGrid = (fn) => GRIDS.map((g) => {
+        const pts = ok.filter((r) => (r.grid_n || 1) === g);
+        return { k: g, label: `${g}³`, v: pts.reduce((s, r) => s + fn(r), 0) / (pts.length || 1) };
+      });
+
+      drawBarsLabel($("accCam"), byCam((r) => r.acc || 0), "#3dd6c6", "acc");
+      drawBarsLabel($("thruCam"), byCam((r) => r.throughput || 0), "#7eb8ff", "thru");
+      drawBarsLabel($("availCam"), byCam((r) => r.availability || 0), "#c49bff", "avail%");
+      drawBarsLabel($("accGrid"), byGrid((r) => r.acc || 0), "#3dd6c6", "acc");
+      drawBarsLabel($("thruGrid"), byGrid((r) => r.throughput || 0), "#7eb8ff", "thru");
+      drawBarsLabel($("availGrid"), byGrid((r) => r.availability || 0), "#c49bff", "avail%");
 
       drawHeat($("heatAcc"), ok, (r) => r.acc, 175, (v) => v.toFixed(1));
       drawHeat($("heatScore"), ok, (r) => r.score, 130, (v) => v.toFixed(0));

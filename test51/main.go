@@ -164,6 +164,36 @@ func rebuildReportsFromResults(trees []Tree, results []modeResult, done map[stri
 	return out
 }
 
+// enrichReportsFromResults fills missing throughput on saved report rows from results.json.
+// Older reports were saved before throughput was copied into leaf rows — no re-run needed.
+func enrichReportsFromResults(reports []treeReport, results []modeResult) bool {
+	byID := map[string]modeResult{}
+	for _, r := range results {
+		id := baseJobID(r.ID)
+		prev, ok := byID[id]
+		if !ok || phaseRank(r.Phase) >= phaseRank(prev.Phase) {
+			rr := r
+			rr.ID = id
+			byID[id] = rr
+		}
+	}
+	changed := false
+	for ri := range reports {
+		for li := range reports[ri].Rows {
+			row := &reports[ri].Rows[li]
+			m, ok := byID[row.ID]
+			if !ok {
+				continue
+			}
+			if row.Thru == 0 && m.Thru > 0 {
+				row.Thru = m.Thru
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
 func main() {
 	modesFlag := flag.String("modes", "all", "all = AllNamedTrainModes, or csv (sgd,step_sgd,TweenSplitSparse,…)")
 	thinkK := flag.Int("think", 4, "recurrent self-think steps before each env action")
@@ -282,6 +312,29 @@ func main() {
 			seeded = rebuildReportsFromResults(trees, results, done)
 		}
 		if len(seeded) > 0 {
+			enrichSrc := disk.Results
+			if len(enrichSrc) == 0 {
+				enrichSrc = results
+			}
+			if len(enrichSrc) > 0 && enrichReportsFromResults(seeded, enrichSrc) {
+				fmt.Printf("📎 backfilled throughput on %d report(s) from ckpt results\n", len(seeded))
+				bestID := prog.BestID
+				if disk.BestID != "" {
+					bestID = disk.BestID
+				}
+				saveRes := enrichSrc
+				if len(disk.Results) > 0 {
+					saveRes = disk.Results
+				}
+				_ = store.SaveResults(map[string]any{
+					"results": saveRes,
+					"reports": seeded,
+					"best_id": bestID,
+					"jobs":    len(jobs),
+					"trees":   len(trees),
+					"ckpt":    *ckpt,
+				})
+			}
 			hub.seedReports(seeded)
 			fmt.Printf("📂 restored %d consolidation report(s) from ckpt (visible before Start)\n", len(seeded))
 		}

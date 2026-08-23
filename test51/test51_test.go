@@ -263,6 +263,22 @@ func TestTreeReportPDFAndHub(t *testing.T) {
 	}
 }
 
+func TestEnrichReportsThroughput(t *testing.T) {
+	reps := []treeReport{{
+		Rows: []leafRow{{ID: "job-a", Thru: 0, Score: 100}},
+	}}
+	results := []modeResult{{ID: "job-a", Thru: 42.5, Phase: "train"}}
+	if !enrichReportsFromResults(reps, results) {
+		t.Fatal("expected change")
+	}
+	if reps[0].Rows[0].Thru != 42.5 {
+		t.Fatalf("thru %v", reps[0].Rows[0].Thru)
+	}
+	if enrichReportsFromResults(reps, results) {
+		t.Fatal("already enriched")
+	}
+}
+
 func TestSortReportsBestFirst(t *testing.T) {
 	reps := []treeReport{
 		{Index: 1, BestScore: 100, BestAcc: 30},
