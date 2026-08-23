@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -335,11 +336,26 @@ func (h *liveHub) seedReports(reps []treeReport) {
 func (h *liveHub) pulseMode(r modeResult)  { h.pulseLeaf(r) }
 func (h *liveHub) finishMode(r modeResult) { h.pulseLeaf(r) }
 
+// sortReports best → worst by tree best Score, then Acc, then Δacc.
+func sortReports(reps []treeReport) {
+	sort.Slice(reps, func(i, j int) bool {
+		a, b := reps[i], reps[j]
+		if a.BestScore != b.BestScore {
+			return a.BestScore > b.BestScore
+		}
+		if a.BestAcc != b.BestAcc {
+			return a.BestAcc > b.BestAcc
+		}
+		return a.BestΔ > b.BestΔ
+	})
+}
+
 func (h *liveHub) snapshot() livePayload {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	board := append([]leafRow(nil), h.board...)
 	reports := append([]treeReport(nil), h.reports...)
+	sortReports(reports)
 	return livePayload{
 		At:       time.Now().UTC(),
 		Status:   h.status,

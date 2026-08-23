@@ -172,7 +172,7 @@
     </div>
 
     <section class="reports panel" style="margin-top:1rem">
-      <h3>Consolidation reports · finished trees</h3>
+	<h3>Consolidation reports · best → worst (by Score)</h3>
       <div id="reports" class="empty">No trees finished yet.</div>
     </section>
 
@@ -258,14 +258,21 @@
         el.textContent = "No trees finished yet.";
         return;
       }
+      const sorted = reps.slice().sort((a, b) => {
+        const ds = (b.best_score ?? 0) - (a.best_score ?? 0);
+        if (ds) return ds;
+        const da = (b.best_acc ?? 0) - (a.best_acc ?? 0);
+        if (da) return da;
+        return (b.best_acc_delta ?? 0) - (a.best_acc_delta ?? 0);
+      });
       el.className = "";
-      el.innerHTML = reps.slice().reverse().map((r, i) => {
-        const n = r.index || (reps.length - i);
-        const href = r.url || `/report/${n}`;
+      el.innerHTML = sorted.map((r, i) => {
+        const n = r.index || 0;
+        const href = r.url || (n ? `/report/${n}` : "#");
         return `
         <a class="report" href="${href}" target="_blank" rel="noopener">
           <header>
-            <strong>#${n} ${r.mode}</strong>
+            <strong>#${i + 1} ${r.mode}</strong>
             <span class="chip">${r.layer}/${r.dtype}</span>
             <span class="chip">${r.challenge}</span>
             <span class="chip">${r.leaves} leaves</span>

@@ -262,3 +262,15 @@ func TestTreeReportPDFAndHub(t *testing.T) {
 		t.Fatalf("bad pdf len=%d head=%q", len(pdf), pdf[:min(8, len(pdf))])
 	}
 }
+
+func TestSortReportsBestFirst(t *testing.T) {
+	reps := []treeReport{
+		{Index: 1, BestScore: 100, BestAcc: 30},
+		{Index: 2, BestScore: 500, BestAcc: 40},
+		{Index: 3, BestScore: 500, BestAcc: 35},
+	}
+	sortReports(reps)
+	if reps[0].Index != 2 || reps[1].Index != 3 || reps[2].Index != 1 {
+		t.Fatalf("order got %d %d %d", reps[0].Index, reps[1].Index, reps[2].Index)
+	}
+}
