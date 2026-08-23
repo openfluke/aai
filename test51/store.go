@@ -138,6 +138,31 @@ func (s *Store) SaveResults(v any) error {
 	return os.Rename(tmp, s.resultsPath())
 }
 
+// resultsFile is the on-disk shape of results.json (partial decode is fine).
+type resultsFile struct {
+	Results []modeResult `json:"results"`
+	Reports []treeReport `json:"reports"`
+	BestID  string       `json:"best_id"`
+}
+
+// LoadResults reads results.json if present (reports + full result rows).
+func (s *Store) LoadResults() (resultsFile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out resultsFile
+	b, err := os.ReadFile(s.resultsPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return out, nil
+		}
+		return out, err
+	}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
 func doneSet(ids []string) map[string]bool {
 	m := make(map[string]bool, len(ids))
 	for _, id := range ids {

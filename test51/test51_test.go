@@ -238,3 +238,27 @@ func TestGroupTrees(t *testing.T) {
 		t.Fatal("expected distinct trees")
 	}
 }
+
+func TestTreeReportPDFAndHub(t *testing.T) {
+	leaves := []modeResult{
+		{ID: "a", Mode: "NormalBP", Layer: "dense", DType: "float32", Challenge: chalChase,
+			LR: 0.02, Cams: 1, GridN: 1, Phase: "after_train", Acc: 30, Soft: 40, Score: 300, AccDelta: 2},
+		{ID: "b", Mode: "NormalBP", Layer: "dense", DType: "float32", Challenge: chalChase,
+			LR: 2, Cams: 2, GridN: 2, Phase: "after_train", Acc: 40, Soft: 50, Score: 400, AccDelta: 5},
+	}
+	tr := Tree{Key: "NormalBP|dense|float32|chase", Mode: "NormalBP", Layer: "dense", DType: "float32", Challenge: chalChase, Jobs: make([]Job, 2)}
+	rep := summarizeTree(tr, leaves)
+	if rep.BestID != "b" || len(rep.Rows) != 2 {
+		t.Fatalf("best=%s rows=%d", rep.BestID, len(rep.Rows))
+	}
+	hub := newLiveHub()
+	hub.finishTree(rep)
+	got, ok := hub.reportByIndex(1)
+	if !ok || got.URL != "/report/1" || got.PDF != "/report/1.pdf" {
+		t.Fatalf("hub report %#v ok=%v", got, ok)
+	}
+	pdf := buildReportPDF(got)
+	if len(pdf) < 200 || string(pdf[:4]) != "%PDF" {
+		t.Fatalf("bad pdf len=%d head=%q", len(pdf), pdf[:min(8, len(pdf))])
+	}
+}

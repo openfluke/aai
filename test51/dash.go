@@ -4,6 +4,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,27 +15,33 @@ import (
 //go:embed index.html
 var dashHTML []byte
 
+//go:embed report.html
+var reportHTML []byte
+
 // leafRow is one variant inside the active tree (LR × cam × grid).
 type leafRow struct {
-	ID     string  `json:"id"`
-	LR     float64 `json:"lr"`
-	Cams   int     `json:"cams"`
-	GridN  int     `json:"grid_n"`
-	Phase  string  `json:"phase,omitempty"`
-	Acc    float64 `json:"acc"`
-	Soft   float64 `json:"soft_acc"`
-	Avail  float64 `json:"availability"`
-	Score  float64 `json:"score"`
-	RAMKiB float64 `json:"ram_kib"`
-	Levels int     `json:"levels"`
-	AccΔ   float64 `json:"acc_delta,omitempty"`
+	ID      string  `json:"id"`
+	LR      float64 `json:"lr"`
+	Cams    int     `json:"cams"`
+	GridN   int     `json:"grid_n"`
+	Phase   string  `json:"phase,omitempty"`
+	Acc     float64 `json:"acc"`
+	Soft    float64 `json:"soft_acc"`
+	Avail   float64 `json:"availability"`
+	Score   float64 `json:"score"`
+	RAMKiB  float64 `json:"ram_kib"`
+	Levels  int     `json:"levels"`
+	AccΔ    float64 `json:"acc_delta,omitempty"`
 	Improve float64 `json:"improve_pct,omitempty"`
-	Done   bool    `json:"done"`
-	Err    string  `json:"error,omitempty"`
+	Done    bool    `json:"done"`
+	Err     string  `json:"error,omitempty"`
 }
 
 // treeReport is appended when a whole architecture tree finishes; board clears after.
 type treeReport struct {
+	Index     int       `json:"index"`
+	URL       string    `json:"url"`
+	PDF       string    `json:"pdf"`
 	Key       string    `json:"key"`
 	Mode      string    `json:"mode"`
 	Layer     string    `json:"layer"`
@@ -48,6 +56,7 @@ type treeReport struct {
 	BestCams  int       `json:"best_cams"`
 	BestGrid  int       `json:"best_grid"`
 	Finished  time.Time `json:"finished"`
+	Rows      []leafRow `json:"rows,omitempty"`
 }
 
 type treeMeta struct {
@@ -281,10 +290,45 @@ func (h *liveHub) finishLeaf(r modeResult) {
 func (h *liveHub) finishTree(rep treeReport) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	rep.Index = len(h.reports) + 1
+	rep.URL = "/report/" + itoa(rep.Index)
+	rep.PDF = "/report/" + itoa(rep.Index) + ".pdf"
+	if len(rep.Rows) == 0 && len(h.board) > 0 {
+		rep.Rows = append([]leafRow(nil), h.board...)
+	}
 	h.reports = append(h.reports, rep)
 	h.board = nil
 	h.status = fmtTreeStatus(h.tree, "archived") + " → report #" + itoa(len(h.reports))
 	h.tree.LeafDone = h.tree.LeafTotal
+}
+
+func (h *liveHub) reportByIndex(n int) (treeReport, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if n < 1 || n > len(h.reports) {
+		return treeReport{}, false
+	}
+	return h.reports[n-1], true
+}
+
+// seedReports loads prior consolidation reports on resume (no board wipe).
+func (h *liveHub) seedReports(reps []treeReport) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.reports = nil
+	for i, rep := range reps {
+		rep.Index = i + 1
+		rep.URL = "/report/" + itoa(rep.Index)
+		rep.PDF = "/report/" + itoa(rep.Index) + ".pdf"
+		h.reports = append(h.reports, rep)
+	}
+	if len(h.reports) > 0 {
+		if !h.started {
+			h.status = "waiting for Start · " + itoa(len(h.reports)) + " report(s) ready"
+		} else {
+			h.status = "resumed · " + itoa(len(h.reports)) + " consolidation report(s) loaded"
+		}
+	}
 }
 
 // Legacy aliases used by runCfg pulse paths.
@@ -311,6 +355,7 @@ func (h *liveHub) snapshot() livePayload {
 		Tree:     h.tree,
 		Board:    board,
 		Reports:  reports,
+		Started:  h.started,
 		LPD:      h.lpd,
 	}
 }
@@ -330,6 +375,7 @@ type livePayload struct {
 	Tree     treeMeta     `json:"tree"`
 	Board    []leafRow    `json:"board"`
 	Reports  []treeReport `json:"reports"`
+	Started  bool         `json:"started"`
 	LPD      lucy.LPD     `json:"lpd"`
 }
 
@@ -348,9 +394,58 @@ func (d *dashServer) signalStart() { d.hub.signalStart() }
 func (d *dashServer) listen() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write(dashHTML)
+	})
+	mux.HandleFunc("/report/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/report/")
+		if path == "" {
+			http.NotFound(w, r)
+			return
+		}
+		wantPDF := strings.HasSuffix(path, ".pdf")
+		idStr := strings.TrimSuffix(path, ".pdf")
+		n, err := strconv.Atoi(idStr)
+		if err != nil || n < 1 {
+			http.Error(w, "bad report id", http.StatusBadRequest)
+			return
+		}
+		rep, ok := d.hub.reportByIndex(n)
+		if !ok {
+			http.Error(w, "report not found", http.StatusNotFound)
+			return
+		}
+		if wantPDF {
+			pdf := buildReportPDF(rep)
+			w.Header().Set("Content-Type", "application/pdf")
+			w.Header().Set("Content-Disposition", `inline; filename="test51-tree-`+itoa(n)+`.pdf"`)
+			w.Header().Set("Cache-Control", "no-store")
+			_, _ = w.Write(pdf)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(reportHTML)
+	})
+	mux.HandleFunc("/api/report/", func(w http.ResponseWriter, r *http.Request) {
+		idStr := strings.TrimPrefix(r.URL.Path, "/api/report/")
+		idStr = strings.TrimSuffix(idStr, "/")
+		n, err := strconv.Atoi(idStr)
+		if err != nil || n < 1 {
+			http.Error(w, "bad report id", http.StatusBadRequest)
+			return
+		}
+		rep, ok := d.hub.reportByIndex(n)
+		if !ok {
+			http.Error(w, "report not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, rep)
 	})
 	mux.HandleFunc("/api/live", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, d.hub.snapshot())
@@ -376,9 +471,11 @@ func (d *dashServer) listen() error {
 		writeJSON(w, map[string]any{
 			"name": "test51",
 			"apis": map[string]string{
-				"live":  "/api/live",
-				"board": "/api/board",
-				"start": "POST /api/start",
+				"live":   "/api/live",
+				"board":  "/api/board",
+				"start":  "POST /api/start",
+				"report": "/report/{n}",
+				"pdf":    "/report/{n}.pdf",
 			},
 		})
 	})

@@ -49,14 +49,14 @@ go run . -modes NormalBP,TweenSplitSparse -challenges chase -lrs 0.02,2 -cams 1-
 | `-grids` | `1-3` | `1×1×1` → `3×3×3` |
 | `-permute` | false | layers=all dtypes=all + funny LR + all challenges + cams/grids |
 | `-duration` / `-after-freeze` / `-after-train` | `3s` / `2s` / `3s` | phase walls |
-| `-ckpt` | `test51_ckpt` | progress + history + results |
+| `-ckpt` | `test51_ckpt` | progress + history + results (saved every leaf; `-resume` default skips done IDs) |
 | `-addr` | `:5151` | dash (`""` disables) |
 
 ## Dashboard
 
 - **Active tree** banner — mode / layer / dtype / challenge + tree & leaf progress
 - **Board** — only current tree leaves (LR × cam × grid) with Acc / Score / Δacc / Δ%
-- **Consolidation reports** — finished trees (best leaf); board clears after each
+- **Consolidation reports** — click a finished tree → full report tab (graphs + leaf table); **Download PDF** / `/report/{n}.pdf`
 - **Playfield** — simple 2D canvas (agent / goal / think orbs), not a noisy Three.js stage
 
 ## Self-improve phases (per leaf)

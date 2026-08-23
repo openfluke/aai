@@ -74,6 +74,12 @@ func summarizeTree(t Tree, leaves []modeResult) treeReport {
 	}
 	best := -1.0
 	for _, r := range leaves {
+		row := leafRow{
+			ID: r.ID, LR: r.LR, Cams: r.Cams, GridN: r.GridN, Phase: r.Phase,
+			Acc: r.Acc, Soft: r.Soft, Avail: r.Avail, Score: r.Score, RAMKiB: r.RAMKiB,
+			Levels: r.Levels, AccΔ: r.AccDelta, Improve: r.ImprovePct, Done: true, Err: r.Err,
+		}
+		rep.Rows = append(rep.Rows, row)
 		if r.Err != "" {
 			continue
 		}
@@ -93,6 +99,67 @@ func summarizeTree(t Tree, leaves []modeResult) treeReport {
 		}
 	}
 	return rep
+}
+
+
+func baseJobID(id string) string {
+	for _, suf := range []string{"|after_train", "|after_freeze", "|freeze", "|after", "|promote"} {
+		if len(id) > len(suf) && id[len(id)-len(suf):] == suf {
+			return id[:len(id)-len(suf)]
+		}
+	}
+	return id
+}
+
+func phaseRank(phase string) int {
+	switch phase {
+	case "after_train":
+		return 3
+	case "train", "":
+		return 2
+	case "after_freeze", "freeze":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// rebuildReportsFromResults rebuilds consolidation reports for fully-done trees from ckpt rows.
+func rebuildReportsFromResults(trees []Tree, results []modeResult, done map[string]bool) []treeReport {
+	byID := map[string]modeResult{}
+	for _, r := range results {
+		id := baseJobID(r.ID)
+		prev, ok := byID[id]
+		if !ok || phaseRank(r.Phase) >= phaseRank(prev.Phase) {
+			rr := r
+			rr.ID = id
+			byID[id] = rr
+		}
+	}
+	var out []treeReport
+	for _, tree := range trees {
+		allDone := true
+		for _, j := range tree.Jobs {
+			if !done[j.ID] {
+				allDone = false
+				break
+			}
+		}
+		if !allDone {
+			continue
+		}
+		leaves := make([]modeResult, 0, len(tree.Jobs))
+		for _, j := range tree.Jobs {
+			if r, ok := byID[j.ID]; ok {
+				leaves = append(leaves, r)
+			}
+		}
+		if len(leaves) == 0 {
+			continue
+		}
+		out = append(out, summarizeTree(tree, leaves))
+	}
+	return out
 }
 
 func main() {
@@ -191,6 +258,33 @@ func main() {
 	prog.Total = len(jobs)
 
 	hub := newLiveHub()
+	var results []modeResult
+	if len(prog.Completed) > 0 && *resume {
+		results = append(results, prog.Completed...)
+	}
+	disk, _ := store.LoadResults()
+	if *resume && len(disk.Results) > len(results) {
+		// results.json can be richer (phase rows); keep progress Completed as leaf source of truth for resume skip,
+		// but prefer disk results when rebuilding reports if Completed is empty.
+		if len(results) == 0 {
+			results = append(results, disk.Results...)
+		}
+	}
+
+	// Seed consolidation reports BEFORE Start so the dash shows them while waiting.
+	if *resume {
+		var seeded []treeReport
+		if len(disk.Reports) > 0 {
+			seeded = disk.Reports
+		} else {
+			seeded = rebuildReportsFromResults(trees, results, done)
+		}
+		if len(seeded) > 0 {
+			hub.seedReports(seeded)
+			fmt.Printf("📂 restored %d consolidation report(s) from ckpt (visible before Start)\n", len(seeded))
+		}
+	}
+
 	var dash *dashServer
 	if strings.TrimSpace(*addr) != "" {
 		dash = newDashServer(*addr, hub)
@@ -210,10 +304,6 @@ func main() {
 	fmt.Println("╔══════════════════════════════════════════════════════════════════════════╗")
 	fmt.Println("║  test51 — trees: mode×layer×dtype×challenge → LR↑×cams×grids           ║")
 	fmt.Println("╚══════════════════════════════════════════════════════════════════════════╝")
-	var results []modeResult
-	if len(prog.Completed) > 0 && *resume {
-		results = append(results, prog.Completed...)
-	}
 
 	pending := 0
 	for _, j := range jobs {
@@ -368,6 +458,7 @@ func main() {
 			_ = store.SaveProgress(prog)
 			_ = store.SaveResults(map[string]any{
 				"results": results,
+				"reports": hub.snapshot().Reports,
 				"best_id": prog.BestID,
 				"jobs":    len(jobs),
 				"trees":   len(trees),
@@ -463,9 +554,11 @@ func main() {
 
 	_ = store.SaveResults(map[string]any{
 		"results": results,
+		"reports": hub.snapshot().Reports,
 		"lpd":     lpd,
 		"best_id": prog.BestID,
 		"jobs":    len(jobs),
+		"trees":   len(trees),
 		"ckpt":    *ckpt,
 	})
 	fmt.Printf("💾 %s/{progress,history,results}.json\n", *ckpt)
