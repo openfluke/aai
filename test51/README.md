@@ -24,7 +24,10 @@ So you no longer wait for every `lr=0.02` across all modes before seeing higher 
 ```bash
 cd apps/aai/test51
 go test .
-go run .                    # FULL matrix: all modes × all layers × all dtypes × all challenges × funny LR × cams 1–3 × grids 1³–3³
+./start.sh                  # background on 0.0.0.0:5151 — safe to exit SSH
+./stop.sh                   # stop background run
+tail -f test51.log          # follow log
+go run .                    # foreground (FULL matrix)
 # open http://<host-ip>:5151 → Start
 ```
 
