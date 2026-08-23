@@ -24,16 +24,15 @@ So you no longer wait for every `lr=0.02` across all modes before seeing higher 
 ```bash
 cd apps/aai/test51
 go test .
-go run .                    # dense + float32 × all modes × funny LR × cams × grids × challenges
+go run .                    # FULL matrix: all modes × all layers × all dtypes × all challenges × funny LR × cams 1–3 × grids 1³–3³
 # open http://127.0.0.1:5151 → Start
 ```
 
-Defaults keep the leaf board small per tree (typically `8 LR × 3 cams × 3 grids = 72` rows). Full matrix:
+That is ~**1.4M** jobs (~20k trees × 72 leaves). Resume skips done IDs. To shrink:
 
 ```bash
-go run . -permute            # layers=all dtypes=all …
-# or shrink further:
-go run . -modes NormalBP,TweenSplitSparse -challenges chase -lrs 0.02,2 -cams 1-3 -grids 1-3
+go run . -layers dense -dtypes float32          # ~10k jobs (old “sane” default)
+go run . -modes NormalBP -challenges chase -lrs 0.02,2
 ```
 
 ## Flags
@@ -42,12 +41,12 @@ go run . -modes NormalBP,TweenSplitSparse -challenges chase -lrs 0.02,2 -cams 1-
 |------|---------|---------|
 | `-modes` | `all` | all named train modes, or csv |
 | `-lrs` | `funny` | `0.02…1e6` ascending, or csv |
-| `-layers` | `dense` | `dense\|…\|all` |
-| `-dtypes` | `float32` | `float32\|all\|csv` |
+| `-layers` | `all` | `dense\|…\|all` |
+| `-dtypes` | `all` | `float32\|all\|csv` |
 | `-challenges` | `all` | chase/flee/collect/teleport/shock |
 | `-cams` | `1-3` | single → tricameral |
 | `-grids` | `1-3` | `1×1×1` → `3×3×3` |
-| `-permute` | false | layers=all dtypes=all + funny LR + all challenges + cams/grids |
+| `-permute` | false | force full matrix (same as defaults) |
 | `-duration` / `-after-freeze` / `-after-train` | `3s` / `2s` / `3s` | phase walls |
 | `-ckpt` | `test51_ckpt` | progress + history + results (saved every leaf; `-resume` default skips done IDs) |
 | `-addr` | `:5151` | dash (`""` disables) |

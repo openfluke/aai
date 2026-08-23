@@ -172,12 +172,12 @@ func main() {
 	win := flag.Duration("window", time.Second, "Lucy pulse window")
 	lr := flag.Float64("lr", 0.05, "single LR when -lrs empty (ignored if -lrs set)")
 	lrsFlag := flag.String("lrs", "funny", "funny|all = 0.02…1e6 sweep, or csv; empty = use -lr once")
-	layersFlag := flag.String("layers", "dense", "dense|dense-wide|dense-deep|dense-deep-wide|all")
-	dtypesFlag := flag.String("dtypes", "float32", "float32|all|csv (all = every core.AllDTypes)")
+	layersFlag := flag.String("layers", "all", "dense|dense-wide|dense-deep|dense-deep-wide|all")
+	dtypesFlag := flag.String("dtypes", "all", "float32|all|csv (all = every core.AllDTypes)")
 	challengesFlag := flag.String("challenges", "all", "chase|flee|collect|teleport|shock|all|mock")
 	camsFlag := flag.String("cams", "1-3", "camera count(s): 1|1,2,3|1-3|all (single→tricameral)")
 	gridsFlag := flag.String("grids", "1-3", "mesh cube edge: 1|1,2,3|1x1x1,3x3x3|1-3|all")
-	permute := flag.Bool("permute", false, "layers=all dtypes=all lrs=funny challenges=all cams=1-3 grids=1-3")
+	permute := flag.Bool("permute", false, "force full matrix (same as current defaults: layers=all dtypes=all …)")
 	seed := flag.Int64("seed", 1, "rng seed")
 	addr := flag.String("addr", ":5151", "dash listen address (empty = no dash)")
 	game := flag.String("game", "", "empty/mock = Go challenges; ls20 = Python ARC-AGI-3 bridge")
@@ -188,7 +188,7 @@ func main() {
 	autoStart := flag.Bool("autostart", false, "skip dash Start gate")
 	flag.Parse()
 
-	// -permute = full matrix. Default go run . = dense/float32 × all modes × funny LR × cams × grids × challenges.
+	// Default go run . = full matrix. -permute forces the same (compat). Shrink with -layers/-dtypes.
 	if *permute {
 		*layersFlag = "all"
 		*dtypesFlag = "all"
