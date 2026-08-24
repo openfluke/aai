@@ -290,3 +290,35 @@ func TestSortReportsBestFirst(t *testing.T) {
 		t.Fatalf("order got %d %d %d", reps[0].Index, reps[1].Index, reps[2].Index)
 	}
 }
+
+func TestRebuildLPDByChallenge(t *testing.T) {
+	rows := []modeResult{
+		{ID: "c1", Mode: "NormalBP", Layer: "dense", DType: "float32", Challenge: chalChase,
+			Phase: "train", Acc: 90, Soft: 90, Thru: 100, Avail: 90, Score: 800, RAMKiB: 100},
+		{ID: "t1", Mode: "NormalBP", Layer: "dense", DType: "float32", Challenge: chalTeleport,
+			Phase: "train", Acc: 10, Soft: 20, Thru: 100, Avail: 90, Score: 90, RAMKiB: 100},
+		{ID: "c2", Mode: "BinaryPacked", Layer: "dense", DType: "uint8", Challenge: chalChase,
+			Phase: "train", Acc: 70, Soft: 75, Thru: 200, Avail: 95, Score: 1300, RAMKiB: 20},
+	}
+	by := rebuildLPDByChallenge(rows)
+	if len(by) != 2 {
+		t.Fatalf("want 2 boards got %d", len(by))
+	}
+	if by[chalChase].N != 2 || by[chalTeleport].N != 1 {
+		t.Fatalf("chase n=%d teleport n=%d", by[chalChase].N, by[chalTeleport].N)
+	}
+	// Chase champ must come from chase rows — teleport's weak Acc must not win chase.
+	if by[chalChase].Champ.ID != "c1" && by[chalChase].Champ.ID != "c2" &&
+		by[chalChase].AccChamp.ID != "c1" && by[chalChase].AccChamp.ID != "c2" {
+		t.Fatalf("chase champ leaked: %#v", by[chalChase].Champ)
+	}
+	if by[chalTeleport].AccChamp.ID != "t1" && by[chalTeleport].Champ.ID != "t1" {
+		t.Fatalf("teleport board wrong: %#v", by[chalTeleport].Champ)
+	}
+	hub := newLiveHub()
+	hub.setLPDs(by)
+	snap := hub.snapshot()
+	if len(snap.LPDByChallenge) != 2 {
+		t.Fatalf("snap boards %d", len(snap.LPDByChallenge))
+	}
+}

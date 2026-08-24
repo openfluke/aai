@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -521,7 +522,7 @@ func main() {
 				"trees":   len(trees),
 				"ckpt":    *ckpt,
 			})
-			hub.setLPD(rebuildLPD(results))
+			hub.setLPDs(rebuildLPDByChallenge(results))
 		}
 
 		rep := summarizeTree(tree, treeLeaves)
@@ -538,24 +539,31 @@ func main() {
 		})
 	}
 
-	pts := make([]lucy.Sample, 0, len(results))
+	byChal := rebuildLPDByChallenge(results)
+	hub.setLPDs(byChal)
+	printBoard(results, byChal)
+
+	// Promote from the challenge that owns BestID (never cross-game LPD).
+	lpd := lucy.LPD{}
+	chalForPromote := ""
 	for _, r := range results {
-		phaseOK := r.Phase == "" || r.Phase == "train" || r.Phase == "after_train"
-		if r.Err != "" || !phaseOK {
-			continue
+		if prog.BestID != "" && r.ID == prog.BestID {
+			chalForPromote = r.Challenge
+			break
 		}
-		id := r.Mode
-		if r.ID != "" {
-			id = r.ID
-		}
-		pts = append(pts, lucy.Sample{
-			ID: id, Mode: r.Mode, DType: nz(r.DType, "float32"), Arch: nz(r.Layer, "dense-think"),
-			Score: r.Score, Soft: r.Soft, Acc: r.Acc, Thru: r.Thru, Avail: r.Avail, RAMKiB: r.RAMKiB,
-		})
 	}
-	lpd := lucy.BuildLPD(pts)
-	hub.setLPD(lpd)
-	printBoard(results, lpd)
+	if chalForPromote != "" {
+		lpd = byChal[chalForPromote]
+	}
+	if lpd.N == 0 {
+		for _, c := range allChallenges() {
+			if byChal[c].N > 0 {
+				lpd = byChal[c]
+				chalForPromote = c
+				break
+			}
+		}
+	}
 
 	champMode := lpd.LiveChamp.Mode
 	if champMode == "" {
@@ -580,6 +588,9 @@ func main() {
 				if r.Err != "" || len(r.Weights) == 0 {
 					continue
 				}
+				if chalForPromote != "" && r.Challenge != chalForPromote {
+					continue
+				}
 				if r.Phase != "" && r.Phase != "train" && r.Phase != "after_train" {
 					continue
 				}
@@ -592,7 +603,8 @@ func main() {
 			}
 		}
 		if champ != nil {
-			fmt.Printf("\nLPD promote: %s for %s (weight copy → keep thinking+training)\n", champ.ID, *promote)
+			fmt.Printf("\nLPD promote [%s]: %s for %s (weight copy → keep thinking+training)\n",
+				chalForPromote, champ.ID, *promote)
 			pm, _ := parallel.ParseTrainMode(champ.Mode)
 			dt := core.ParseDType(champ.DType)
 			pr := runCfg{
@@ -610,18 +622,18 @@ func main() {
 	}
 
 	_ = store.SaveResults(map[string]any{
-		"results": results,
-		"reports": hub.snapshot().Reports,
-		"lpd":     lpd,
-		"best_id": prog.BestID,
-		"jobs":    len(jobs),
-		"trees":   len(trees),
-		"ckpt":    *ckpt,
+		"results":          results,
+		"reports":          hub.snapshot().Reports,
+		"lpd_by_challenge": byChal,
+		"best_id":          prog.BestID,
+		"jobs":             len(jobs),
+		"trees":            len(trees),
+		"ckpt":             *ckpt,
 	})
 	fmt.Printf("💾 %s/{progress,history,results}.json\n", *ckpt)
 
 	if strings.TrimSpace(*outJSON) != "" {
-		mustWrite(*outJSON, map[string]any{"results": results, "lpd": lpd})
+		mustWrite(*outJSON, map[string]any{"results": results, "lpd_by_challenge": byChal})
 		fmt.Printf("💾 %s\n", *outJSON)
 	}
 
@@ -944,49 +956,99 @@ func availOf(inf, tr time.Duration) float64 {
 }
 
 
-func rebuildLPD(rows []modeResult) lucy.LPD {
-	pts := make([]lucy.Sample, 0, len(rows))
-	for _, r := range rows {
-		phaseOK := r.Phase == "" || r.Phase == "train" || r.Phase == "after_train"
-		if r.Err != "" || !phaseOK {
-			continue
-		}
-		id := r.Mode
-		if r.ID != "" {
-			id = r.ID
-		}
-		arch := nz(r.Layer, "dense-think")
-		if r.Cams > 1 {
-			arch = fmt.Sprintf("%s|%s|%s", arch, camName(r.Cams), gridName(r.GridN))
-		} else if r.GridN > 1 {
-			arch = fmt.Sprintf("%s|%s", arch, gridName(r.GridN))
-		}
-		pts = append(pts, lucy.Sample{
-			ID: id, Mode: r.Mode, DType: nz(r.DType, "float32"), Arch: arch,
-			Score: r.Score, Soft: r.Soft, Acc: r.Acc, Thru: r.Thru, Avail: r.Avail, RAMKiB: r.RAMKiB,
-		})
+func lpdSample(r modeResult) (lucy.Sample, bool) {
+	phaseOK := r.Phase == "" || r.Phase == "train" || r.Phase == "after_train"
+	if r.Err != "" || !phaseOK {
+		return lucy.Sample{}, false
 	}
-	return lucy.BuildLPD(pts)
+	id := r.Mode
+	if r.ID != "" {
+		id = r.ID
+	}
+	arch := nz(r.Layer, "dense-think")
+	if r.Cams > 1 {
+		arch = fmt.Sprintf("%s|%s|%s", arch, camName(r.Cams), gridName(r.GridN))
+	} else if r.GridN > 1 {
+		arch = fmt.Sprintf("%s|%s", arch, gridName(r.GridN))
+	}
+	return lucy.Sample{
+		ID: id, Mode: r.Mode, DType: nz(r.DType, "float32"), Arch: arch,
+		Score: r.Score, Soft: r.Soft, Acc: r.Acc, Thru: r.Thru, Avail: r.Avail, RAMKiB: r.RAMKiB,
+	}, true
 }
 
-func printBoard(rows []modeResult, lpd lucy.LPD) {
-	fmt.Println("\n╔══════════════════════╦═══════╦═══════╦═══════╦════════╦════════╗")
-	fmt.Println("║ Job / Mode           ║ Acc   ║ Soft  ║ Avail ║ Score  ║ Lv ║ Δacc ║")
-	fmt.Println("╠══════════════════════╬═══════╬═══════╬═══════╬════════╬════════╣")
+// rebuildLPDByChallenge builds a separate LPD board per challenge so chase Acc
+// never ranks against teleport Acc (apples-to-oranges).
+func rebuildLPDByChallenge(rows []modeResult) map[string]lucy.LPD {
+	buckets := map[string][]lucy.Sample{}
 	for _, r := range rows {
-		name := r.Mode
-		if r.ID != "" {
-			name = shortID(r.ID)
-		}
-		if r.Err != "" {
-			fmt.Printf("║ %-20s ║ ERR %s\n", clip(name, 20), r.Err)
+		s, ok := lpdSample(r)
+		if !ok {
 			continue
 		}
-		fmt.Printf("║ %-20s ║ %5.1f ║ %5.1f ║ %5.1f ║ %6.0f ║ %2d ║ %+5.1f ║\n",
-			clip(name, 20), r.Acc, r.Soft, r.Avail, r.Score, r.Levels, r.AccDelta)
+		chal := r.Challenge
+		if chal == "" {
+			chal = "unknown"
+		}
+		buckets[chal] = append(buckets[chal], s)
 	}
-	fmt.Println("╚══════════════════════╩═══════╩═══════╩═══════╩════════╩════════╝")
-	fmt.Printf("LPD champ=%s live=%s gold-std=%s\n", lpd.Champ.Mode, lpd.LiveChamp.Mode, lpd.GoldStd.Mode)
+	out := make(map[string]lucy.LPD, len(buckets))
+	for chal, pts := range buckets {
+		out[chal] = lucy.BuildLPD(pts)
+	}
+	return out
+}
+
+func orderedLPDChallenges(by map[string]lucy.LPD) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, c := range allChallenges() {
+		if _, ok := by[c]; ok {
+			out = append(out, c)
+			seen[c] = true
+		}
+	}
+	var extra []string
+	for c := range by {
+		if !seen[c] {
+			extra = append(extra, c)
+		}
+	}
+	sort.Strings(extra)
+	return append(out, extra...)
+}
+
+func printBoard(rows []modeResult, byChal map[string]lucy.LPD) {
+	for _, chal := range orderedLPDChallenges(byChal) {
+		fmt.Printf("\n── LPD · %s ──\n", chal)
+		fmt.Println("╔══════════════════════╦═══════╦═══════╦═══════╦════════╦════════╗")
+		fmt.Println("║ Job / Mode           ║ Acc   ║ Soft  ║ Avail ║ Score  ║ Lv ║ Δacc ║")
+		fmt.Println("╠══════════════════════╬═══════╬═══════╬═══════╬════════╬════════╣")
+		n := 0
+		for _, r := range rows {
+			if r.Challenge != chal {
+				continue
+			}
+			n++
+			name := r.Mode
+			if r.ID != "" {
+				name = shortID(r.ID)
+			}
+			if r.Err != "" {
+				fmt.Printf("║ %-20s ║ ERR %s\n", clip(name, 20), r.Err)
+				continue
+			}
+			fmt.Printf("║ %-20s ║ %5.1f ║ %5.1f ║ %5.1f ║ %6.0f ║ %2d ║ %+5.1f ║\n",
+				clip(name, 20), r.Acc, r.Soft, r.Avail, r.Score, r.Levels, r.AccDelta)
+		}
+		if n == 0 {
+			fmt.Println("║ (no rows)            ║")
+		}
+		fmt.Println("╚══════════════════════╩═══════╩═══════╩═══════╩════════╩════════╝")
+		lpd := byChal[chal]
+		fmt.Printf("LPD champ=%s live=%s gold-std=%s (n=%d)\n",
+			lpd.Champ.Mode, lpd.LiveChamp.Mode, lpd.GoldStd.Mode, lpd.N)
+	}
 }
 
 func clip(s string, n int) string {

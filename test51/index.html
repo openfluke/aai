@@ -95,6 +95,12 @@
     .phase.pending { color: var(--muted); }
 
     .reports { margin-top: 1rem; }
+    .chal-group { margin-bottom: 1.25rem; }
+    .chal-group h4 {
+      margin: 0 0 0.5rem; font-size: 0.85rem; letter-spacing: 0.04em;
+      text-transform: uppercase; color: var(--muted); font-weight: 600;
+    }
+    .chal-group.active-chal h4 { color: var(--accent); }
     .report {
       border: 1px solid var(--line); border-radius: 8px; padding: 0.75rem 0.9rem;
       margin-bottom: 0.55rem; background: #141b24;
@@ -107,6 +113,30 @@
     .report .best { font-family: var(--mono); font-size: 12px; color: var(--accent); }
     .report .open { margin-left: auto; color: var(--muted); font-size: 11px; }
     .empty { color: var(--muted); padding: 1rem; font-size: 13px; }
+
+    .lpd-boards { margin-top: 1rem; }
+    .lpd-grid {
+      display: grid; gap: 0.75rem;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    }
+    .lpd-board {
+      border: 1px solid var(--line); border-radius: 8px; padding: 0.7rem 0.85rem;
+      background: #141b24;
+    }
+    .lpd-board.active-chal { border-color: #3dd6c688; }
+    .lpd-board header {
+      display: flex; flex-wrap: wrap; gap: 0.35rem 0.65rem; align-items: baseline;
+      margin-bottom: 0.45rem; font-size: 12px; color: var(--muted);
+    }
+    .lpd-board header strong {
+      color: var(--ink); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .lpd-board ol {
+      margin: 0; padding-left: 1.15rem; font-family: var(--mono); font-size: 11.5px;
+      color: #b8c4d0;
+    }
+    .lpd-board li { margin-bottom: 0.2rem; }
+    .lpd-board .champs { font-family: var(--mono); font-size: 11px; color: var(--accent); margin-bottom: 0.4rem; }
 
     footer {
       margin-top: 1.25rem; padding-top: 0.75rem; border-top: 1px solid var(--line);
@@ -122,7 +152,7 @@
         <h1>test51 <em>tree sweep</em></h1>
         <p class="sub">
           One architecture at a time: <b>mode · layer · dtype · challenge</b>, then sweep
-          <b>LR↑ × cams × 1³…3³</b>. When that tree finishes it lands in the report and the board clears.
+          <b>LR↑ × cams × 1³…3³</b>. Consolidations and LPD are per-challenge — chase never ranks against teleport.
         </p>
       </div>
       <div style="text-align:right">
@@ -172,12 +202,17 @@
     </div>
 
     <section class="reports panel" style="margin-top:1rem">
-	<h3>Consolidation reports · best → worst (by Score)</h3>
+      <h3>Consolidation reports · per challenge · best → worst</h3>
       <div id="reports" class="empty">No trees finished yet.</div>
     </section>
 
+    <section class="lpd-boards panel">
+      <h3>LPD sub-leaderboards · one per challenge</h3>
+      <div id="lpdBoards" class="empty">No finished leaves yet.</div>
+    </section>
+
     <footer>
-      <div id="lpd">LPD champ=<strong>—</strong> · live=<strong>—</strong></div>
+      <div id="lpd">active LPD —</div>
       <div id="jobMeta">job —</div>
     </footer>
   </div>
@@ -251,30 +286,35 @@
       });
     }
 
-    function renderReports(reps) {
-      const el = $("reports");
-      if (!reps || !reps.length) {
-        el.className = "empty";
-        el.textContent = "No trees finished yet.";
-        return;
-      }
-      const sorted = reps.slice().sort((a, b) => {
-        const ds = (b.best_score ?? 0) - (a.best_score ?? 0);
-        if (ds) return ds;
-        const da = (b.best_acc ?? 0) - (a.best_acc ?? 0);
-        if (da) return da;
-        return (b.best_acc_delta ?? 0) - (a.best_acc_delta ?? 0);
+    const CHAL_ORDER = ["chase", "flee", "collect", "teleport", "shock"];
+
+    function sortChallenges(keys) {
+      return keys.slice().sort((a, b) => {
+        const ia = CHAL_ORDER.indexOf(a);
+        const ib = CHAL_ORDER.indexOf(b);
+        if (ia < 0 && ib < 0) return a.localeCompare(b);
+        if (ia < 0) return 1;
+        if (ib < 0) return -1;
+        return ia - ib;
       });
-      el.className = "";
-      el.innerHTML = sorted.map((r, i) => {
-        const n = r.index || 0;
-        const href = r.url || (n ? `/report/${n}` : "#");
-        return `
+    }
+
+    function reportRank(a, b) {
+      const ds = (b.best_score ?? 0) - (a.best_score ?? 0);
+      if (ds) return ds;
+      const da = (b.best_acc ?? 0) - (a.best_acc ?? 0);
+      if (da) return da;
+      return (b.best_acc_delta ?? 0) - (a.best_acc_delta ?? 0);
+    }
+
+    function renderReportCard(r, rank) {
+      const n = r.index || 0;
+      const href = r.url || (n ? `/report/${n}` : "#");
+      return `
         <a class="report" href="${href}" target="_blank" rel="noopener">
           <header>
-            <strong>#${i + 1} ${r.mode}</strong>
+            <strong>#${rank} ${r.mode}</strong>
             <span class="chip">${r.layer}/${r.dtype}</span>
-            <span class="chip">${r.challenge}</span>
             <span class="chip">${r.leaves} leaves</span>
             <span class="open">full report ↗</span>
           </header>
@@ -284,7 +324,60 @@
             · Δacc ${fmt(r.best_acc_delta)}
           </div>
         </a>`;
+    }
+
+    function renderReports(reps, activeChal) {
+      const el = $("reports");
+      if (!reps || !reps.length) {
+        el.className = "empty";
+        el.textContent = "No trees finished yet.";
+        return;
+      }
+      const by = {};
+      reps.forEach((r) => {
+        const c = r.challenge || "unknown";
+        (by[c] || (by[c] = [])).push(r);
+      });
+      el.className = "";
+      el.innerHTML = sortChallenges(Object.keys(by)).map((chal) => {
+        const group = by[chal].slice().sort(reportRank);
+        const active = chal === activeChal ? " active-chal" : "";
+        return `<div class="chal-group${active}">
+          <h4>${chal}</h4>
+          ${group.map((r, i) => renderReportCard(r, i + 1)).join("")}
+        </div>`;
       }).join("");
+    }
+
+    function renderLPD(byChal, activeChal) {
+      const el = $("lpdBoards");
+      const keys = Object.keys(byChal || {});
+      if (!keys.length) {
+        el.className = "empty";
+        el.textContent = "No finished leaves yet.";
+        $("lpd").textContent = "active LPD —";
+        return;
+      }
+      el.className = "lpd-grid";
+      el.innerHTML = sortChallenges(keys).map((chal) => {
+        const lpd = byChal[chal] || {};
+        const active = chal === activeChal ? " active-chal" : "";
+        const top = (lpd.top || []).slice(0, 5);
+        const list = top.length
+          ? `<ol>${top.map((r) =>
+              `<li>${r.mode || "—"} · ${r.dtype || ""} · Acc ${fmt(r.avg_accuracy)} · LPD ${fmt(r.lpd, 2)}</li>`
+            ).join("")}</ol>`
+          : `<div class="empty" style="padding:0.25rem 0">n=${lpd.n || 0} · no ranked rows yet</div>`;
+        return `<div class="lpd-board${active}">
+          <header><strong>${chal}</strong><span>n=${lpd.n || 0}</span></header>
+          <div class="champs">champ ${lpd.champ?.mode || "—"} · ${lpd.champ?.dtype || ""} · live ${lpd.live_champ?.mode || "—"}</div>
+          ${list}
+        </div>`;
+      }).join("");
+      const active = byChal[activeChal] || byChal[sortChallenges(keys)[0]] || {};
+      const label = activeChal || sortChallenges(keys)[0] || "—";
+      $("lpd").innerHTML =
+        `active <strong>${label}</strong> · champ=<strong>${active.champ?.mode || "—"}</strong> · live=<strong>${active.live_champ?.mode || "—"}</strong>`;
     }
 
     // Simple 2D playfield — agent + goal from live.play (parsed from layer colors).
@@ -368,16 +461,15 @@
         activeID = live.job_id || "";
         renderTree(live.tree);
         renderBoard(live.board);
-        renderReports(live.reports);
+        const activeChal = live.active_challenge || live.tree?.challenge || "";
+        renderReports(live.reports, activeChal);
+        renderLPD(live.lpd_by_challenge || {}, activeChal);
         const play = (live.play && live.play.ok) ? live.play : playFromLayers(live.frame);
         drawPlay(play, live.think_k);
         const act = live.action || {};
         $("playMeta").textContent =
           `mode ${live.mode || "—"} · think ${live.think_k ?? "—"} · action ${act.id ?? "—"} · levels ${live.frame?.levels_completed ?? 0}`;
         $("jobMeta").textContent = `phase ${live.phase || "—"} · ${live.job_index || 0}/${live.job_total || 0} · ${live.job_id || "—"}`;
-        const lpd = live.lpd || {};
-        $("lpd").innerHTML =
-          `LPD champ=<strong>${lpd.champ?.mode || "—"}</strong> · live=<strong>${lpd.live_champ?.mode || "—"}</strong>`;
       } catch (e) {
         $("status").textContent = "poll error";
       }

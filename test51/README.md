@@ -16,6 +16,7 @@ mode → layer → dtype → challenge  →  LR↑ → cams → grid
 | **Leaves** | That tree’s `LR↑ × cams(1–3) × grid(1³–3³)` sweep |
 | **Board** | Shows **only the active tree’s leaves** (dozens, not millions) |
 | **Report** | When a tree finishes → summary appended, board **clears** |
+| **LPD** | **One leaderboard per challenge** — chase never ranks against teleport |
 
 So you no longer wait for every `lr=0.02` across all modes before seeing higher LRs on the architecture you care about.
 

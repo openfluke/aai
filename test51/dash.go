@@ -90,7 +90,7 @@ type liveHub struct {
 	tree     treeMeta
 	board    []leafRow // ONLY active tree — cleared on finishTree
 	reports  []treeReport
-	lpd      lucy.LPD
+	lpdByChal map[string]lucy.LPD // one LPD board per challenge (never cross-game)
 	started  bool
 	startCh  chan struct{}
 }
@@ -182,9 +182,9 @@ func extractPlay(fr Frame) playView {
 	return pv
 }
 
-func (h *liveHub) setLPD(l lucy.LPD) {
+func (h *liveHub) setLPDs(by map[string]lucy.LPD) {
 	h.mu.Lock()
-	h.lpd = l
+	h.lpdByChal = by
 	h.mu.Unlock()
 }
 
@@ -374,28 +374,30 @@ func (h *liveHub) snapshot() livePayload {
 		Tree:     h.tree,
 		Board:    board,
 		Reports:  reports,
-		Started:  h.started,
-		LPD:      h.lpd,
+		Started:         h.started,
+		LPDByChallenge:  h.lpdByChal,
+		ActiveChallenge: h.tree.Challenge,
 	}
 }
 
 type livePayload struct {
-	At       time.Time    `json:"at"`
-	Status   string       `json:"status"`
-	Mode     string       `json:"mode"`
-	ThinkK   int          `json:"think_k"`
-	Action   Action       `json:"action"`
-	Frame    Frame        `json:"frame"`
-	Play     playView     `json:"play"`
-	JobID    string       `json:"job_id,omitempty"`
-	Phase    string       `json:"phase,omitempty"`
-	JobIndex int          `json:"job_index,omitempty"`
-	JobTotal int          `json:"job_total,omitempty"`
-	Tree     treeMeta     `json:"tree"`
-	Board    []leafRow    `json:"board"`
-	Reports  []treeReport `json:"reports"`
-	Started  bool         `json:"started"`
-	LPD      lucy.LPD     `json:"lpd"`
+	At               time.Time            `json:"at"`
+	Status           string               `json:"status"`
+	Mode             string               `json:"mode"`
+	ThinkK           int                  `json:"think_k"`
+	Action           Action               `json:"action"`
+	Frame            Frame                `json:"frame"`
+	Play             playView             `json:"play"`
+	JobID            string               `json:"job_id,omitempty"`
+	Phase            string               `json:"phase,omitempty"`
+	JobIndex         int                  `json:"job_index,omitempty"`
+	JobTotal         int                  `json:"job_total,omitempty"`
+	Tree             treeMeta             `json:"tree"`
+	Board            []leafRow            `json:"board"`
+	Reports          []treeReport         `json:"reports"`
+	Started          bool                 `json:"started"`
+	LPDByChallenge   map[string]lucy.LPD  `json:"lpd_by_challenge"`
+	ActiveChallenge  string               `json:"active_challenge,omitempty"`
 }
 
 type dashServer struct {
@@ -472,10 +474,11 @@ func (d *dashServer) listen() error {
 	mux.HandleFunc("/api/board", func(w http.ResponseWriter, r *http.Request) {
 		snap := d.hub.snapshot()
 		writeJSON(w, map[string]any{
-			"tree":    snap.Tree,
-			"board":   snap.Board,
-			"reports": snap.Reports,
-			"lpd":     snap.LPD,
+			"tree":              snap.Tree,
+			"board":             snap.Board,
+			"reports":           snap.Reports,
+			"lpd_by_challenge":  snap.LPDByChallenge,
+			"active_challenge":  snap.ActiveChallenge,
 		})
 	})
 	mux.HandleFunc("/api/start", func(w http.ResponseWriter, r *http.Request) {
