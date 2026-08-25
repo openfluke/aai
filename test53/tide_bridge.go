@@ -61,11 +61,36 @@ func (t *tideBridge) signalStart() {
 	}
 }
 
-func (t *tideBridge) beginJob(job Job, phase string, idx, total int) {
+func (t *tideBridge) setQueue(done, total int, msg string) {
 	if t == nil || t.tr == nil {
 		return
 	}
-	t.tr.SetCellProgress(idx, total, phase+" · "+job.ID)
+	if total < 1 {
+		total = 1
+	}
+	if done < 0 {
+		done = 0
+	}
+	left := total - done
+	if left < 0 {
+		left = 0
+	}
+	if msg == "" {
+		msg = fmt.Sprintf("%d/%d done · %d left", done, total, left)
+	}
+	t.tr.SetMeta(done, total, done, total, msg)
+}
+
+func (t *tideBridge) beginJob(job Job, phase string, done, total int) {
+	if t == nil || t.tr == nil {
+		return
+	}
+	left := total - done
+	if left < 0 {
+		left = 0
+	}
+	msg := fmt.Sprintf("%s · %s · %d/%d · %d left", phase, job.ID, done, total, left)
+	t.tr.SetMeta(done, total, done, total, msg)
 	t.tr.Begin(jobToTideCell(job), phase)
 }
 

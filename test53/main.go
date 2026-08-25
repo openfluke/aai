@@ -127,8 +127,10 @@ func main() {
 	fmt.Printf("resume: done=%d pending=%d\n", len(jobs)-len(pending), len(pending))
 
 	tide := startTideBridge(*tideAddr, jobs, *lr)
+	alreadyDone := len(jobs) - len(pending)
 	if tide != nil {
 		tide.seedCompleted(results)
+		tide.setQueue(alreadyDone, len(jobs), fmt.Sprintf("ready · %d/%d · %d left", alreadyDone, len(jobs), len(pending)))
 		tide.signalStart()
 	}
 
@@ -143,15 +145,25 @@ func main() {
 		return
 	}
 
+	type leafOut struct {
+		job Job
+		res modeResult
+	}
 	jobCh := make(chan Job, workers*2)
-	outCh := make(chan modeResult, workers*2)
+	outCh := make(chan leafOut, workers*2)
 	var wg sync.WaitGroup
+	var started atomic.Int64
 	for w := 0; w < workers; w++ {
 		wg.Add(1)
 		go func(seed int64) {
 			defer wg.Done()
 			for j := range jobCh {
-				outCh <- runJob(j, seed, *hidden, *dur, *lr)
+				n := int(started.Add(1))
+				if tide != nil {
+					// done-so-far for display = alreadyDone + finished; starting count is approximate
+					tide.beginJob(j, "train", alreadyDone+n-1, len(jobs))
+				}
+				outCh <- leafOut{job: j, res: runJob(j, seed, *hidden, *dur, *lr)}
 			}
 		}(int64(w+1) * 9973)
 	}
@@ -166,12 +178,19 @@ func main() {
 
 	var finished int64
 	totalPending := len(pending)
-	for r := range outCh {
+	planTotal := len(jobs)
+	for out := range outCh {
+		r := out.res
+		j := out.job
 		n := int(atomic.AddInt64(&finished, 1))
+		doneNow := alreadyDone + n
 		if tide != nil {
-			tide.beginJob(Job{ID: r.ID, Kind: CellKind(r.Layer), DType: core.ParseDType(r.DType)}, "train", n, totalPending)
+			// Re-begin with the real job (mode!) then finish so mode_progress.Left ticks down.
+			tide.beginJob(j, "train", doneNow-1, planTotal)
 			tide.pulseRunning(r)
 			tide.finishJob(r)
+			left := planTotal - doneNow
+			tide.setQueue(doneNow, planTotal, fmt.Sprintf("%s · %d/%d · %d left", r.ID, doneNow, planTotal, left))
 		}
 		results = append(results, r)
 		prog.DoneIDs = append(prog.DoneIDs, r.ID)
@@ -187,13 +206,15 @@ func main() {
 		})
 		_ = store.SaveJSON("results.json", map[string]any{
 			"results": results, "best_id": prog.BestID, "best_score": prog.BestScore,
+			"done": doneNow, "total": planTotal, "left": planTotal - doneNow,
 		})
 		if n%25 == 0 || n == totalPending || r.Err != "" {
 			tag := "ok"
 			if r.Err != "" {
 				tag = "ERR " + trim(r.Err, 60)
 			}
-			fmt.Printf("  [%d/%d] Acc %.1f Score %.0f · %s · %s\n", n, totalPending, r.Acc, r.Score, r.ID, tag)
+			fmt.Printf("  [%d/%d pending · %d left] Acc %.1f Score %.0f · %s · %s\n",
+				n, totalPending, planTotal-doneNow, r.Acc, r.Score, r.ID, tag)
 		}
 		if n%100 == 0 || n == totalPending {
 			writeLPD(store, results)
