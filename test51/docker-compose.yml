@@ -1,0 +1,33 @@
+# Docker Compose for one farm config (dense × mode slice × full permute).
+#
+# Prefer:  ./run-config.sh 1|2|3
+# Manual:  cp configs/1.env .env && docker compose -p test51-c1 up --build -d
+#
+# Build context = chaosglue parent (needs sibling welvet/ + tide/ + webgpu/).
+#
+# Dashboards (autostart — no Start click):
+#   http://localhost:5151  — test51 tree consolidations
+#   http://localhost:8080  — Tide Lucy board + /api/report.pdf
+
+services:
+  test51:
+    build:
+      context: ../../../..
+      dockerfile: welvet/apps/aai/test51/Dockerfile
+    container_name: test51-c${TEST51_CONFIG:-0}
+    env_file:
+      - .env
+    environment:
+      TEST51_ADDR: "0.0.0.0:5151"
+      TIDE_ADDR: "0.0.0.0:8080"
+      TEST51_AUTOSTART: "true"
+      TEST51_FULL: "true"
+      TEST51_LAYERS: "dense"
+      TEST51_CKPT: "/app/test51_ckpt"
+    ports:
+      - "${TEST51_PORT:-5151}:5151"
+      - "${TIDE_PORT:-8080}:8080"
+    volumes:
+      - ./test51_ckpt/config${TEST51_CONFIG:-0}:/app/test51_ckpt
+    restart: unless-stopped
+    working_dir: /app

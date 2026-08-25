@@ -38,10 +38,15 @@
     .sub { color: var(--muted); margin: 0.25rem 0 0; max-width: 42rem; }
     button#start {
       background: var(--accent); color: #062a28; border: 0; border-radius: 6px;
-      padding: 0.55rem 1.1rem; font-weight: 700; cursor: pointer;
+      font: 600 14px/1.25 var(--font); padding: 0.65rem 1.1rem; cursor: pointer;
+      max-width: 22rem; white-space: normal; text-align: center;
     }
-    button#start:disabled { opacity: 0.45; cursor: default; }
-    .status { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+    button#start:disabled { opacity: 0.5; cursor: default; }
+    .plan {
+      margin-top: 0.45rem; font-family: var(--mono); font-size: 11px;
+      color: var(--muted); max-width: 22rem; line-height: 1.35;
+    }
+    .status { margin-top: 0.35rem; color: var(--muted); font-family: var(--mono); font-size: 12px; }
 
     .tree-banner {
       background: linear-gradient(135deg, #1c2836, #15202b);
@@ -157,6 +162,7 @@
       </div>
       <div style="text-align:right">
         <button id="start" type="button">Start</button>
+        <div class="plan" id="planHint">waiting for plan…</div>
         <div class="status" id="status">waiting</div>
       </div>
     </header>
@@ -214,6 +220,7 @@
     <footer>
       <div id="lpd">active LPD —</div>
       <div id="jobMeta">job —</div>
+      <div id="tideLink"></div>
     </footer>
   </div>
 
@@ -457,6 +464,23 @@
         const res = await fetch("/api/live", { cache: "no-store" });
         const live = await res.json();
         $("status").textContent = live.status || "—";
+        const plan = live.plan || {};
+        const planEl = $("planHint");
+        if (planEl) {
+          if (plan.label) {
+            planEl.textContent =
+              `${plan.trees || 0} trees · ${plan.leaves || 0} leaves · ${plan.pending || 0} pending` +
+              (plan.full ? " · full permute" : "") +
+              `\ndtypes=${plan.dtypes || "—"} · challenges=${plan.challenges || "—"} · lrs=${plan.lrs || "—"} · cams=${plan.cams || "—"} · grids=${plan.grids || "—"}`;
+          } else {
+            planEl.textContent = "waiting for plan…";
+          }
+        }
+        if (!live.started && plan.label) {
+          startBtn.textContent = `Start · ${plan.label}`;
+        } else if (live.started) {
+          startBtn.textContent = "Running";
+        }
         if (live.started || (live.status && !String(live.status).includes("waiting for Start"))) startBtn.disabled = true;
         activeID = live.job_id || "";
         renderTree(live.tree);
@@ -470,6 +494,16 @@
         $("playMeta").textContent =
           `mode ${live.mode || "—"} · think ${live.think_k ?? "—"} · action ${act.id ?? "—"} · levels ${live.frame?.levels_completed ?? 0}`;
         $("jobMeta").textContent = `phase ${live.phase || "—"} · ${live.job_index || 0}/${live.job_total || 0} · ${live.job_id || "—"}`;
+        const tideEl = $("tideLink");
+        if (tideEl) {
+          if (live.tide_url) {
+            const port = String(live.tide_url).replace(/^.*:/, "");
+            const href = `${location.protocol}//${location.hostname}:${port}`;
+            tideEl.innerHTML = `Tide Lucy · <a href="${href}" target="_blank" rel="noopener">${href}</a>`;
+          } else {
+            tideEl.textContent = "";
+          }
+        }
       } catch (e) {
         $("status").textContent = "poll error";
       }

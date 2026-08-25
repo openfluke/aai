@@ -2,3 +2,5 @@ test51_ckpt
 test51
 test51.pid
 test51.log
+run
+.env

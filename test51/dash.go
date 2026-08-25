@@ -89,10 +89,28 @@ type liveHub struct {
 
 	tree     treeMeta
 	board    []leafRow // ONLY active tree — cleared on finishTree
-	reports  []treeReport
+	reports   []treeReport
 	lpdByChal map[string]lucy.LPD // one LPD board per challenge (never cross-game)
-	started  bool
-	startCh  chan struct{}
+	tide      *tideBridge         // optional Tide Lucy dash (second port)
+	plan      sweepPlan
+	started   bool
+	startCh   chan struct{}
+}
+
+// sweepPlan is what Start will run (shown on the dash before the gate opens).
+type sweepPlan struct {
+	Label      string   `json:"label"`
+	Modes      []string `json:"modes"`
+	Layers     []string `json:"layers"`
+	DTypes     string   `json:"dtypes"`
+	Challenges string   `json:"challenges"`
+	LRs        string   `json:"lrs"`
+	Cams       string   `json:"cams"`
+	Grids      string   `json:"grids"`
+	Trees      int      `json:"trees"`
+	Leaves     int      `json:"leaves"`
+	Pending    int      `json:"pending"`
+	Full       bool     `json:"full"`
 }
 
 func newLiveHub() *liveHub {
@@ -108,11 +126,16 @@ func (h *liveHub) awaitStart() { <-h.startCh }
 
 func (h *liveHub) signalStart() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	var tide *tideBridge
 	if !h.started {
 		h.started = true
 		h.status = "running"
 		close(h.startCh)
+	}
+	tide = h.tide
+	h.mu.Unlock()
+	if tide != nil {
+		tide.signalStart()
 	}
 }
 
@@ -336,8 +359,32 @@ func (h *liveHub) seedReports(reps []treeReport) {
 }
 
 // Legacy aliases used by runCfg pulse paths.
-func (h *liveHub) pulseMode(r modeResult)  { h.pulseLeaf(r) }
+func (h *liveHub) pulseMode(r modeResult) {
+	h.pulseLeaf(r)
+	h.mu.RLock()
+	t := h.tide
+	h.mu.RUnlock()
+	if t != nil {
+		t.pulseRunning(r)
+	}
+}
 func (h *liveHub) finishMode(r modeResult) { h.pulseLeaf(r) }
+
+func (h *liveHub) setTide(t *tideBridge) {
+	h.mu.Lock()
+	h.tide = t
+	h.mu.Unlock()
+}
+
+func (h *liveHub) setPlan(p sweepPlan) {
+	h.mu.Lock()
+	h.plan = p
+	if !h.started {
+		h.status = "waiting for Start · " + p.Label + " · " +
+			itoa(p.Trees) + " trees / " + itoa(p.Leaves) + " leaves (" + itoa(p.Pending) + " pending)"
+	}
+	h.mu.Unlock()
+}
 
 // sortReports best → worst by tree best Score, then Acc, then Δacc.
 func sortReports(reps []treeReport) {
@@ -377,7 +424,16 @@ func (h *liveHub) snapshot() livePayload {
 		Started:         h.started,
 		LPDByChallenge:  h.lpdByChal,
 		ActiveChallenge: h.tree.Challenge,
+		TideURL:         tideURLFrom(h.tide),
+		Plan:            h.plan,
 	}
+}
+
+func tideURLFrom(t *tideBridge) string {
+	if t == nil || t.srv == nil {
+		return ""
+	}
+	return "/tide → :" + dashPort(t.srv.Addr)
 }
 
 type livePayload struct {
@@ -398,6 +454,8 @@ type livePayload struct {
 	Started          bool                 `json:"started"`
 	LPDByChallenge   map[string]lucy.LPD  `json:"lpd_by_challenge"`
 	ActiveChallenge  string               `json:"active_challenge,omitempty"`
+	TideURL          string               `json:"tide_url,omitempty"`
+	Plan             sweepPlan            `json:"plan"`
 }
 
 type dashServer struct {
@@ -490,6 +548,12 @@ func (d *dashServer) listen() error {
 		writeJSON(w, map[string]any{"ok": true})
 	})
 	mux.HandleFunc("/api/meta", func(w http.ResponseWriter, r *http.Request) {
+		tideURL := ""
+		d.hub.mu.RLock()
+		if d.hub.tide != nil && d.hub.tide.srv != nil {
+			tideURL = "http://<host>:" + dashPort(d.hub.tide.srv.Addr)
+		}
+		d.hub.mu.RUnlock()
 		writeJSON(w, map[string]any{
 			"name": "test51",
 			"apis": map[string]string{
@@ -499,6 +563,7 @@ func (d *dashServer) listen() error {
 				"report": "/report/{n}",
 				"pdf":    "/report/{n}.pdf",
 			},
+			"tide_url": tideURL,
 		})
 	})
 	srv := &http.Server{Addr: d.addr, Handler: withCORS(mux)}

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openfluke/tide/permute"
 	"github.com/openfluke/welvet/core"
 	"github.com/openfluke/welvet/layers/parallel"
 )
@@ -320,5 +321,56 @@ func TestRebuildLPDByChallenge(t *testing.T) {
 	snap := hub.snapshot()
 	if len(snap.LPDByChallenge) != 2 {
 		t.Fatalf("snap boards %d", len(snap.LPDByChallenge))
+	}
+}
+
+func TestEnvOrModesAndTideCell(t *testing.T) {
+	t.Setenv("TEST51_MODES", "NormalBP,FastProxy")
+	if got := EnvOr("TEST51_MODES", "all"); got != "NormalBP,FastProxy" {
+		t.Fatalf("EnvOr %q", got)
+	}
+	ms, err := parseModeList(EnvOr("TEST51_MODES", "all"))
+	if err != nil || len(ms) != 2 {
+		t.Fatalf("modes %v err %v", ms, err)
+	}
+	cell := jobToTideCell(Job{
+		ID: "NormalBP|dense|float32|chase|lr=0.02|cam=1|g=1",
+		Mode: ms[0], Layer: "dense", DType: core.DTypeFloat32, Challenge: chalChase, Cams: 1, GridN: 1, LR: 0.02,
+	})
+	if cell.Mode != permute.ModeSGD {
+		t.Fatalf("tide mode %s want sgd", cell.Mode)
+	}
+	if cell.ID == "" || cell.Cams != 1 {
+		t.Fatalf("cell %#v", cell)
+	}
+}
+
+func TestFarmConfigModeLists(t *testing.T) {
+	specs := []string{
+		"sgd,step_sgd,tween,tween_chain,step_tween,step_tween_chain,MeshBP,MeshTween,MeshTweenChain,TweenSplit",
+		"StepTweenSplit,TweenAlt,StepTweenAlt,TweenSplitHeadProxy,TweenSplitLinear,TweenSplitFastProxy,TweenSplitLinearCache,TweenSplitHeadProxyAsync,TweenSplitSparse,MeshTweenSplit",
+		"MeshTweenAlt,MeshTweenSplitFastProxy,MeshTweenSplitSparse,StepTweenSplitHeadProxy,StepTweenSplitLinear,StepTweenSplitFastProxy,StepTweenSplitLinearCache,StepTweenSplitHeadProxyAsync,StepTweenSplitSparse",
+	}
+	wantN := []int{10, 10, 9}
+	seen := map[parallel.TrainMode]bool{}
+	total := 0
+	for i, spec := range specs {
+		ms, err := parseModeList(spec)
+		if err != nil {
+			t.Fatalf("config %d: %v", i+1, err)
+		}
+		if len(ms) != wantN[i] {
+			t.Fatalf("config %d: got %d modes want %d", i+1, len(ms), wantN[i])
+		}
+		for _, m := range ms {
+			if seen[m] {
+				t.Fatalf("duplicate mode across configs: %s", m.String())
+			}
+			seen[m] = true
+			total++
+		}
+	}
+	if total != 29 {
+		t.Fatalf("total modes %d want 29", total)
 	}
 }

@@ -196,39 +196,47 @@ func enrichReportsFromResults(reports []treeReport, results []modeResult) bool {
 }
 
 func main() {
-	modesFlag := flag.String("modes", "all", "all = AllNamedTrainModes, or csv (sgd,step_sgd,TweenSplitSparse,…)")
-	thinkK := flag.Int("think", 4, "recurrent self-think steps before each env action")
-	dur := flag.Duration("duration", 3*time.Second, "wall per job train phase")
-	afterFreeze := flag.Duration("after-freeze", 2*time.Second, "after train: keep thinking with frozen weights")
-	afterTrain := flag.Duration("after-train", 3*time.Second, "after freeze: keep training (self-improve past stop)")
-	promote := flag.Duration("promote", 5*time.Second, "extra wall for LPD champ after sweep")
-	win := flag.Duration("window", time.Second, "Lucy pulse window")
-	lr := flag.Float64("lr", 0.05, "single LR when -lrs empty (ignored if -lrs set)")
-	lrsFlag := flag.String("lrs", "funny", "funny|all = 0.02…1e6 sweep, or csv; empty = use -lr once")
-	layersFlag := flag.String("layers", "all", "dense|dense-wide|dense-deep|dense-deep-wide|all")
-	dtypesFlag := flag.String("dtypes", "all", "float32|all|csv (all = every core.AllDTypes)")
-	challengesFlag := flag.String("challenges", "all", "chase|flee|collect|teleport|shock|all|mock")
-	camsFlag := flag.String("cams", "1-3", "camera count(s): 1|1,2,3|1-3|all (single→tricameral)")
-	gridsFlag := flag.String("grids", "1-3", "mesh cube edge: 1|1,2,3|1x1x1,3x3x3|1-3|all")
-	permute := flag.Bool("permute", false, "force full matrix (same as current defaults: layers=all dtypes=all …)")
-	seed := flag.Int64("seed", 1, "rng seed")
-	addr := flag.String("addr", "0.0.0.0:5151", "dash listen (0.0.0.0:5151 = all interfaces; empty = no dash)")
-	game := flag.String("game", "", "empty/mock = Go challenges; ls20 = Python ARC-AGI-3 bridge")
-	bridgePy := flag.String("bridge", "", "path to agent_bridge.py (default bridge/agent_bridge.py)")
-	outJSON := flag.String("json", "", "legacy single-file dump (empty = skip; store always writes results.json)")
-	ckpt := flag.String("ckpt", "test51_ckpt", "tide-like checkpoint dir (progress.json + history.json + results.json)")
-	resume := flag.Bool("resume", true, "skip job IDs already in progress.json")
-	autoStart := flag.Bool("autostart", false, "skip dash Start gate")
+	LoadDotEnv(".env")
+
+	modesFlag := flag.String("modes", EnvOr("TEST51_MODES", "all"), "all = AllNamedTrainModes, or csv (NormalBP,FastProxy,sgd,…); env TEST51_MODES")
+	thinkK := flag.Int("think", EnvInt("TEST51_THINK", 4), "recurrent self-think steps before each env action")
+	dur := flag.Duration("duration", EnvDuration("TEST51_DURATION", 3*time.Second), "wall per job train phase")
+	afterFreeze := flag.Duration("after-freeze", EnvDuration("TEST51_AFTER_FREEZE", 2*time.Second), "after train: keep thinking with frozen weights")
+	afterTrain := flag.Duration("after-train", EnvDuration("TEST51_AFTER_TRAIN", 3*time.Second), "after freeze: keep training (self-improve past stop)")
+	promote := flag.Duration("promote", EnvDuration("TEST51_PROMOTE", 5*time.Second), "extra wall for LPD champ after sweep")
+	win := flag.Duration("window", EnvDuration("TEST51_WINDOW", time.Second), "Lucy pulse window")
+	lr := flag.Float64("lr", EnvFloat("TEST51_LR", 0.05), "single LR when -lrs empty (ignored if -lrs set)")
+	lrsFlag := flag.String("lrs", EnvOr("TEST51_LRS", "funny"), "funny|all = 0.02…1e6 sweep, or csv; empty = use -lr once")
+	layersFlag := flag.String("layers", EnvOr("TEST51_LAYERS", "all"), "dense|dense-wide|dense-deep|dense-deep-wide|all")
+	dtypesFlag := flag.String("dtypes", EnvOr("TEST51_DTYPES", "all"), "float32|all|csv (all = every core.AllDTypes)")
+	challengesFlag := flag.String("challenges", EnvOr("TEST51_CHALLENGES", "all"), "chase|flee|collect|teleport|shock|all|mock")
+	camsFlag := flag.String("cams", EnvOr("TEST51_CAMS", "1-3"), "camera count(s): 1|1,2,3|1-3|all (single→tricameral)")
+	gridsFlag := flag.String("grids", EnvOr("TEST51_GRIDS", "1-3"), "mesh cube edge: 1|1,2,3|1x1x1,3x3x3|1-3|all")
+	full := flag.Bool("full", EnvBool("TEST51_FULL", true), "full permute: all dtypes×challenges×funny-LRs×cams×grids (keeps -modes/-layers)")
+	permute := flag.Bool("permute", EnvBool("TEST51_PERMUTE", false), "like -full PLUS every layer (ignores -layers)")
+	seed := flag.Int64("seed", int64(EnvInt("TEST51_SEED", 1)), "rng seed")
+	addr := flag.String("addr", EnvOr("TEST51_ADDR", "0.0.0.0:5151"), "test51 dash listen (empty = no dash)")
+	tideAddr := flag.String("tide-addr", EnvOr("TIDE_ADDR", "0.0.0.0:8080"), "Tide Lucy dash listen (empty = disable Tide reports)")
+	game := flag.String("game", EnvOr("TEST51_GAME", ""), "empty/mock = Go challenges; ls20 = Python ARC-AGI-3 bridge")
+	bridgePy := flag.String("bridge", EnvOr("TEST51_BRIDGE", ""), "path to agent_bridge.py (default bridge/agent_bridge.py)")
+	outJSON := flag.String("json", EnvOr("TEST51_JSON", ""), "legacy single-file dump (empty = skip; store always writes results.json)")
+	ckpt := flag.String("ckpt", EnvOr("TEST51_CKPT", "test51_ckpt"), "tide-like checkpoint dir (progress.json + history.json + results.json)")
+	resume := flag.Bool("resume", EnvBool("TEST51_RESUME", true), "skip job IDs already in progress.json")
+	autoStart := flag.Bool("autostart", EnvBool("TEST51_AUTOSTART", false), "skip dash Start gate")
 	flag.Parse()
 
-	// Default go run . = full matrix. -permute forces the same (compat). Shrink with -layers/-dtypes.
-	if *permute {
-		*layersFlag = "all"
+	// Full permute of the axes around the chosen mode(s) × layer(s).
+	// -full (default): expand dtypes/challenges/LRs/cams/grids; keep -modes/-layers.
+	// -permute: also force every layer recipe.
+	if *full || *permute {
 		*dtypesFlag = "all"
 		*lrsFlag = "funny"
 		*challengesFlag = "all"
 		*camsFlag = "1-3"
 		*gridsFlag = "1-3"
+	}
+	if *permute {
+		*layersFlag = "all"
 	}
 
 	modes, err := parseModeList(*modesFlag)
@@ -291,6 +299,14 @@ func main() {
 	prog.Total = len(jobs)
 
 	hub := newLiveHub()
+	pending := 0
+	for _, j := range jobs {
+		if !done[j.ID] {
+			pending++
+		}
+	}
+	hub.setPlan(buildSweepPlan(modes, layers, *dtypesFlag, *challengesFlag, *lrsFlag, *camsFlag, *gridsFlag,
+		len(trees), len(jobs), pending, *full || *permute))
 	var results []modeResult
 	if len(prog.Completed) > 0 && *resume {
 		results = append(results, prog.Completed...)
@@ -351,24 +367,34 @@ func main() {
 			}
 		}()
 		port := dashPort(listen)
-		fmt.Printf("dash listening on %s  →  http://<this-host-ip>:%s  (all interfaces, Start to begin)\n", listen, port)
+		fmt.Printf("dash listening on %s  →  http://<this-host-ip>:%s  (tree reports; Start to begin)\n", listen, port)
+	}
+
+	tide := startTideBridge(*tideAddr, jobs, *lr, "test51")
+	hub.setTide(tide)
+	if tide != nil && *resume && len(results) > 0 {
+		tide.seedCompleted(results)
+	}
+
+	if dash != nil {
 		if !*autoStart {
 			dash.awaitStart()
 		} else {
 			dash.signalStart()
 		}
+	} else if tide != nil {
+		// no test51 dash — release Tide gate immediately (or wait for Tide Start)
+		if *autoStart {
+			tide.signalStart()
+		}
+	} else if !*autoStart {
+		fmt.Println("(no dash) starting immediately")
 	}
 
 	fmt.Println("╔══════════════════════════════════════════════════════════════════════════╗")
 	fmt.Println("║  test51 — trees: mode×layer×dtype×challenge → LR↑×cams×grids           ║")
 	fmt.Println("╚══════════════════════════════════════════════════════════════════════════╝")
-
-	pending := 0
-	for _, j := range jobs {
-		if !done[j.ID] {
-			pending++
-		}
-	}
+	fmt.Printf("Plan: %s\n", hub.snapshot().Plan.Label)
 	fmt.Printf("Trees: %d  ·  pending leaves: %d / %d  (board shows one tree at a time)\n\n", len(trees), pending, len(jobs))
 
 	globalIdx := 0
@@ -411,6 +437,9 @@ func main() {
 			_ = store.SaveProgress(prog)
 			hub.setMeta(job.ID, "train", i+1, len(jobs))
 			hub.setStatus(fmt.Sprintf("tree %d/%d leaf · train %s", ti+1, len(trees), shortID(job.ID)))
+			if tide != nil {
+				tide.beginJob(job, "train", i+1, len(jobs))
+			}
 
 			fmt.Printf("▶ [%d/%d] %s\n", i+1, len(jobs), job.ID)
 			trainR := runCfg{
@@ -502,6 +531,9 @@ func main() {
 			results = append(results, trainR)
 			treeLeaves = append(treeLeaves, trainR)
 			hub.finishLeaf(trainR)
+			if tide != nil {
+				tide.finishJob(trainR)
+			}
 			prog.DoneIDs = append(prog.DoneIDs, job.ID)
 			done[job.ID] = true
 			prog.Completed = append(prog.Completed, stripWeights(trainR))
@@ -701,6 +733,41 @@ func nz(s, d string) string {
 	return s
 }
 
+func buildSweepPlan(
+	modes []parallel.TrainMode, layers []string,
+	dtypesSpec, challengesSpec, lrsSpec, camsSpec, gridsSpec string,
+	trees, leaves, pending int, full bool,
+) sweepPlan {
+	modeNames := make([]string, len(modes))
+	for i, m := range modes {
+		modeNames[i] = m.String()
+	}
+	layerPart := strings.Join(layers, "+")
+	modePart := strings.Join(modeNames, "+")
+	if len(modeNames) > 3 {
+		modePart = modeNames[0] + "+…" + fmt.Sprintf("(%d)", len(modeNames))
+	}
+	kind := "full permute"
+	if !full {
+		kind = "custom matrix"
+	}
+	label := fmt.Sprintf("%s × %s · %s", layerPart, modePart, kind)
+	return sweepPlan{
+		Label:      label,
+		Modes:      modeNames,
+		Layers:     append([]string(nil), layers...),
+		DTypes:     dtypesSpec,
+		Challenges: challengesSpec,
+		LRs:        lrsSpec,
+		Cams:       camsSpec,
+		Grids:      gridsSpec,
+		Trees:      trees,
+		Leaves:     leaves,
+		Pending:    pending,
+		Full:       full,
+	}
+}
+
 func gameLabel(game string) string {
 	g := strings.TrimSpace(game)
 	if g == "" || g == "mock" {
@@ -725,8 +792,18 @@ func parseModeList(spec string) ([]parallel.TrainMode, error) {
 		var m parallel.TrainMode
 		var err error
 		switch key {
+		case "sgd", "bp", "normal", "normalbp":
+			m = parallel.ModeNormalBP
 		case "stepsgd", "stepbp":
 			m = parallel.ModeStepBP
+		case "tween":
+			m = parallel.ModeTween
+		case "tweenchain":
+			m = parallel.ModeTweenChain
+		case "steptween":
+			m = parallel.ModeStepTween
+		case "steptweenchain":
+			m = parallel.ModeStepTweenChain
 		default:
 			m, err = parallel.ParseTrainMode(tok)
 			if err != nil {
