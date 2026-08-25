@@ -122,10 +122,22 @@ func main() {
 	prog.Total = len(jobs)
 
 	prior, _ := store.LoadResults()
+	if *resume {
+		mergeDoneIDs(prog, prior)
+		done = doneSet(prog.DoneIDs)
+	}
 	results := make([]modeResult, 0, len(prior)+len(jobs))
-	results = append(results, prior...)
+	seenResult := map[string]bool{}
 	for _, r := range prior {
+		if r.ID == "" || seenResult[r.ID] {
+			continue
+		}
+		seenResult[r.ID] = true
+		results = append(results, r)
 		done[r.ID] = true
+	}
+	if *resume && len(prior) > 0 {
+		_ = store.SaveProgress(prog)
 	}
 
 	pending := make([]Job, 0, len(jobs))
@@ -134,7 +146,8 @@ func main() {
 			pending = append(pending, j)
 		}
 	}
-	fmt.Printf("resume: done=%d pending=%d\n", len(jobs)-len(pending), len(pending))
+	fmt.Printf("resume: done=%d pending=%d  ckpt=%d result(s) on disk\n",
+		len(jobs)-len(pending), len(pending), len(results))
 
 	tide := startTideBridge(*tideAddr, jobs, lrs[0])
 	alreadyDone := len(jobs) - len(pending)
@@ -194,6 +207,18 @@ func main() {
 		j := out.job
 		n := int(atomic.AddInt64(&finished, 1))
 		doneNow := alreadyDone + n
+		// Replace prior row for this ID (crash/restart safe).
+		replaced := false
+		for i := range results {
+			if results[i].ID == r.ID {
+				results[i] = r
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			results = append(results, r)
+		}
 		if tide != nil {
 			// Re-begin with the real job (mode!) then finish so mode_progress.Left ticks down.
 			tide.beginJob(j, "train", doneNow-1, planTotal)
@@ -202,8 +227,10 @@ func main() {
 			left := planTotal - doneNow
 			tide.setQueue(doneNow, planTotal, fmt.Sprintf("%s · %d/%d · %d left", r.ID, doneNow, planTotal, left))
 		}
-		results = append(results, r)
-		prog.DoneIDs = append(prog.DoneIDs, r.ID)
+		if !done[r.ID] {
+			prog.DoneIDs = append(prog.DoneIDs, r.ID)
+		}
+		done[r.ID] = true
 		prog.NextIndex = len(prog.DoneIDs)
 		prog.Current = r.ID
 		if r.Err == "" && (prog.BestID == "" || r.Score > prog.BestScore || (r.Score == prog.BestScore && r.Acc > prog.BestAcc)) {

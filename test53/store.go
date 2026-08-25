@@ -135,7 +135,70 @@ func (s *Store) LoadResults() ([]modeResult, error) {
 	if err := json.Unmarshal(b, &wrap); err != nil {
 		return nil, err
 	}
-	return wrap.Results, nil
+	return dedupeResults(wrap.Results), nil
+}
+
+// dedupeResults keeps one row per job ID (best score, then acc).
+func dedupeResults(rows []modeResult) []modeResult {
+	if len(rows) == 0 {
+		return nil
+	}
+	best := make(map[string]modeResult, len(rows))
+	order := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.ID == "" {
+			continue
+		}
+		prev, ok := best[r.ID]
+		if !ok || resultBetter(r, prev) {
+			if !ok {
+				order = append(order, r.ID)
+			}
+			best[r.ID] = r
+		}
+	}
+	out := make([]modeResult, 0, len(best))
+	for _, id := range order {
+		out = append(out, best[id])
+	}
+	return out
+}
+
+func resultBetter(a, b modeResult) bool {
+	if a.Err != "" && b.Err == "" {
+		return false
+	}
+	if a.Err == "" && b.Err != "" {
+		return true
+	}
+	if a.Score != b.Score {
+		return a.Score > b.Score
+	}
+	return a.Acc > b.Acc
+}
+
+// mergeDoneIDs unions progress.done_ids with finished result IDs.
+func mergeDoneIDs(prog *Progress, results []modeResult) {
+	seen := doneSet(prog.DoneIDs)
+	for _, r := range results {
+		if r.ID == "" || r.Err != "" {
+			continue
+		}
+		if seen[r.ID] {
+			continue
+		}
+		seen[r.ID] = true
+		prog.DoneIDs = append(prog.DoneIDs, r.ID)
+	}
+	prog.NextIndex = len(prog.DoneIDs)
+	for _, r := range results {
+		if r.Err != "" {
+			continue
+		}
+		if prog.BestID == "" || r.Score > prog.BestScore || (r.Score == prog.BestScore && r.Acc > prog.BestAcc) {
+			prog.BestID, prog.BestScore, prog.BestAcc = r.ID, r.Score, r.Acc
+		}
+	}
 }
 
 func doneSet(ids []string) map[string]bool {

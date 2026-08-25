@@ -9,6 +9,8 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
 PROJECT=test53
+export TEST53_CKPT_HOST="${TEST53_CKPT_HOST:-$DIR/test53_ckpt}"
+mkdir -p "$TEST53_CKPT_HOST"
 
 ROOT="$(cd "$DIR/../../../.." && pwd)"
 if [[ ! -d "$ROOT/welvet" || ! -d "$ROOT/tide" || ! -d "$ROOT/webgpu" ]]; then
@@ -43,7 +45,7 @@ case "$cmd" in
       cp .env.example .env
       echo "wrote .env (layers=all modes=all dtypes=all workers=4)"
     fi
-    mkdir -p test53_ckpt
+    mkdir -p "$TEST53_CKPT_HOST"
     # Rootless podman socket (no-op if docker engine is up).
     if [[ "$ENGINE" == podman* ]]; then
       systemctl --user start podman.socket 2>/dev/null || true
@@ -67,7 +69,10 @@ case "$cmd" in
     echo
     echo "up · project=$PROJECT  engine=$ENGINE  restart=always  resume=true"
     echo "  tide  http://localhost:${TIDE_PORT:-8080}"
-    echo "  ckpt  $DIR/test53_ckpt/   (HOST — not inside the container)"
+    echo "  ckpt  $TEST53_CKPT_HOST/   (HOST bind — survives rebuild)"
+    if [[ -f "$TEST53_CKPT_HOST/progress.json" ]]; then
+      echo "  resume data present ($(wc -l < "$TEST53_CKPT_HOST/progress.json" 2>/dev/null || echo 0) lines in progress.json)"
+    fi
     echo "  logs  ./run-docker.sh --logs"
     echo "  rebuild  ./run-docker.sh --build"
     ;;

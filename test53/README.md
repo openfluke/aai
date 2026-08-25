@@ -29,7 +29,20 @@ Funny LRs: `0, 2, 200, 2000, 20000, 1m, 10m, 100m`
 | workers | NumCPU (or 4 via `.env` / Docker) |
 | duration | 2s/job |
 | Tide | `:8080` |
-| resume | true → `test53_ckpt/` |
+| resume | true → `test53_ckpt/` on **host** (bind-mounted; survives rebuild) |
+
+Checkpoint files: `progress.json`, `results.json`, `history.json`, `lpd.json`
+
+```bash
+# default host path (set in run-docker.sh):
+apps/aai/test53/test53_ckpt/
+
+# override:
+export TEST53_CKPT_HOST=$HOME/welvet-data/test53_ckpt
+./run-docker.sh --build   # safe — rebuilds image only, ckpt stays on host
+```
+
+**Never** run `docker compose down -v` — that drops named volumes (test53 uses a host bind, but still avoid `-v`).
 
 ## Native
 

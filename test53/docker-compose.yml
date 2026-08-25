@@ -30,8 +30,9 @@ services:
     ports:
       - "${TIDE_PORT:-8080}:8080"
     volumes:
-      # Host bind — results/lpd/progress survive container rebuilds/crashes.
-      - ./test53_ckpt:/app/test53_ckpt
+      # Absolute host path — survives image rebuilds / container recreate.
+      # :z = SELinux relabel (Fedora). Never docker compose down -v.
+      - ${TEST53_CKPT_HOST:-./test53_ckpt}:/app/test53_ckpt:z
     restart: always
     working_dir: /app
     mem_limit: ${TEST53_MEM_LIMIT:-7g}
