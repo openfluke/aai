@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# test53 dayroute in Docker — restart: always, ckpt on host ./test53_ckpt
+# test53 dayroute — Docker or Podman Compose. ckpt on host ./test53_ckpt
 #
 #   ./run-docker.sh
-#   ./run-docker.sh --logs
-#   ./run-docker.sh --stop
-#   ./run-docker.sh --status
+#   ./run-docker.sh --logs|--stop|--status|--restart
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,12 +15,26 @@ if [[ ! -d "$ROOT/welvet" || ! -d "$ROOT/tide" || ! -d "$ROOT/webgpu" ]]; then
   exit 1
 fi
 
+# Prefer real Docker; fall back to Podman (Fedora default).
 if docker compose version >/dev/null 2>&1; then
   dc() { docker compose --project-name "$PROJECT" "$@"; }
-elif command -v docker-compose >/dev/null 2>&1; then
+  ENGINE=docker
+elif command -v docker-compose >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   dc() { docker-compose --project-name "$PROJECT" "$@"; }
+  ENGINE=docker
+elif podman compose version >/dev/null 2>&1; then
+  dc() { podman compose --project-name "$PROJECT" "$@"; }
+  ENGINE=podman
+elif command -v docker-compose >/dev/null 2>&1; then
+  # compose binary present but no engine — still try; often works with DOCKER_HOST=podman
+  export DOCKER_HOST="${DOCKER_HOST:-unix:///run/user/$(id -u)/podman/podman.sock}"
+  dc() { docker-compose --project-name "$PROJECT" "$@"; }
+  ENGINE=podman-socket
 else
-  echo "error: need 'docker compose' or 'docker-compose'" >&2
+  echo "error: need docker compose or podman compose" >&2
+  echo "  Fedora:  sudo dnf install -y moby-engine docker-cli docker-compose docker-compose-switch" >&2
+  echo "       then: sudo systemctl enable --now docker && sudo usermod -aG docker \$USER" >&2
+  echo "  or use podman (already common on Fedora) with compose plugin in ~/.docker/cli-plugins/" >&2
   exit 1
 fi
 
@@ -34,6 +46,10 @@ case "$cmd" in
       echo "wrote .env (layers=all modes=all dtypes=all workers=4)"
     fi
     mkdir -p test53_ckpt
+    # Rootless podman socket (no-op if docker engine is up).
+    if [[ "$ENGINE" == podman* ]]; then
+      systemctl --user start podman.socket 2>/dev/null || true
+    fi
     if command -v lsof >/dev/null 2>&1; then
       pids=$(lsof -tiTCP:8080 -sTCP:LISTEN 2>/dev/null || true)
       if [[ -n "${pids:-}" ]]; then
@@ -43,9 +59,10 @@ case "$cmd" in
         sleep 1
       fi
     fi
+    echo "engine=$ENGINE"
     dc up --build -d
     echo
-    echo "up · project=$PROJECT  restart=always  resume=true"
+    echo "up · project=$PROJECT  engine=$ENGINE  restart=always  resume=true"
     echo "  tide  http://localhost:${TIDE_PORT:-8080}"
     echo "  ckpt  $DIR/test53_ckpt/   (HOST — not inside the container)"
     echo "  logs  ./run-docker.sh --logs"
