@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,11 +35,15 @@ var defaultModesCSV = strings.Join([]string{
 	"StepTweenSplitHeadProxyAsync", "StepTweenSplitSparse",
 }, ",")
 
+// Funny LR ramp: 0 → 2 → 200 → 2k → 20k → 1m → 10m → 100m
+var defaultFunnyLRs = []float64{0, 2, 200, 2000, 20000, 1e6, 1e7, 1e8}
+
 type Job struct {
 	ID    string
 	Kind  CellKind
 	DType core.DType
 	Mode  parallel.TrainMode
+	LR    float64
 }
 
 type modeResult struct {
@@ -46,6 +51,7 @@ type modeResult struct {
 	Layer   string        `json:"layer"`
 	DType   string        `json:"dtype"`
 	Mode    string        `json:"mode"`
+	LR      float64       `json:"lr"`
 	Acc     float64       `json:"acc"`
 	Soft    float64       `json:"soft"`
 	Avail   float64       `json:"avail"`
@@ -65,9 +71,10 @@ func main() {
 	modesFlag := flag.String("modes", EnvOr("TEST53_MODES", defaultModesCSV), "csv of train modes")
 	layersFlag := flag.String("layers", EnvOr("TEST53_LAYERS", "all"), "all|csv cell kinds")
 	dtypesFlag := flag.String("dtypes", EnvOr("TEST53_DTYPES", "all"), "all|csv")
+	lrsFlag := flag.String("lrs", EnvOr("TEST53_LRS", "funny"), "funny|all = 0…100m sweep, or csv (1m/10m/100m ok); empty = use -lr once")
 	workersFlag := flag.Int("workers", EnvInt("TEST53_WORKERS", 0), "0 = NumCPU")
 	dur := flag.Duration("duration", EnvDuration("TEST53_DURATION", 2*time.Second), "wall per job")
-	lr := flag.Float64("lr", EnvFloat("TEST53_LR", 0.05), "learning rate")
+	lrOnce := flag.Float64("lr", EnvFloat("TEST53_LR", 0.05), "single LR when -lrs is empty")
 	hidden := flag.Int("hidden", EnvInt("TEST53_HIDDEN", defaultHidden), "sandwich hidden")
 	ckpt := flag.String("ckpt", EnvOr("TEST53_CKPT", "test53_ckpt"), "checkpoint dir")
 	resume := flag.Bool("resume", EnvBool("TEST53_RESUME", true), "skip done IDs")
@@ -80,6 +87,8 @@ func main() {
 	must(err)
 	dtypes, err := parseDTypeList(*dtypesFlag)
 	must(err)
+	lrs, err := parseLRList(*lrsFlag, *lrOnce)
+	must(err)
 
 	workers := *workersFlag
 	if workers <= 0 {
@@ -90,15 +99,16 @@ func main() {
 	}
 	leafMultiCore = workers == 1
 
-	jobs := expandJobs(kinds, modes, dtypes)
+	jobs := expandJobs(kinds, modes, dtypes, lrs)
 	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║  test53 · dayroute (5-day life) × layer × mode × dtype      ║")
+	fmt.Println("║  test53 · dayroute × layer × mode × dtype × funny-LR        ║")
 	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
 	fmt.Printf("task=dayroute  grid=%dx%d  days=%d  acts=%d  schedule=%v\n",
 		gridSize, gridSize, nDays, nActs, []string{"wake", "bath", "breakfast", "work", "lunch", "gym", "couch", "sleep"})
-	fmt.Printf("kinds=%d modes=%d dtypes=%d jobs=%d workers=%d leafMultiCore=%v dur=%s lr=%g\n",
-		len(kinds), len(modes), len(dtypes), len(jobs), workers, leafMultiCore, *dur, *lr)
+	fmt.Printf("kinds=%d modes=%d dtypes=%d lrs=%d jobs=%d workers=%d leafMultiCore=%v dur=%s\n",
+		len(kinds), len(modes), len(dtypes), len(lrs), len(jobs), workers, leafMultiCore, *dur)
 	fmt.Printf("kinds=%s\n", kindsCSV(kinds))
+	fmt.Printf("lrs=%s\n", lrsCSV(lrs))
 	fmt.Printf("clock=%s  ckpt=%s\n\n", dutyClockName(), *ckpt)
 
 	store := NewStore(*ckpt)
@@ -126,7 +136,7 @@ func main() {
 	}
 	fmt.Printf("resume: done=%d pending=%d\n", len(jobs)-len(pending), len(pending))
 
-	tide := startTideBridge(*tideAddr, jobs, *lr)
+	tide := startTideBridge(*tideAddr, jobs, lrs[0])
 	alreadyDone := len(jobs) - len(pending)
 	if tide != nil {
 		tide.seedCompleted(results)
@@ -163,7 +173,7 @@ func main() {
 					// done-so-far for display = alreadyDone + finished; starting count is approximate
 					tide.beginJob(j, "train", alreadyDone+n-1, len(jobs))
 				}
-				outCh <- leafOut{job: j, res: runJob(j, seed, *hidden, *dur, *lr)}
+				outCh <- leafOut{job: j, res: runJob(j, seed, *hidden, *dur)}
 			}
 		}(int64(w+1) * 9973)
 	}
@@ -230,17 +240,97 @@ func main() {
 	fmt.Println("done")
 }
 
-func expandJobs(kinds []CellKind, modes []parallel.TrainMode, dtypes []core.DType) []Job {
-	out := make([]Job, 0, len(kinds)*len(modes)*len(dtypes))
-	for _, k := range kinds {
-		for _, m := range modes {
-			for _, dt := range dtypes {
-				id := fmt.Sprintf("%s|%s|%s", k, dt, m.String())
-				out = append(out, Job{ID: id, Kind: k, DType: dt, Mode: m})
+func expandJobs(kinds []CellKind, modes []parallel.TrainMode, dtypes []core.DType, lrs []float64) []Job {
+	out := make([]Job, 0, len(kinds)*len(modes)*len(dtypes)*len(lrs))
+	// Mode → dtype outer; kind next so Tide shows dense/mha/lstm/… within the first
+	// ~160 jobs of each mode×dtype (not after finishing all of dense alone).
+	// LR climbs last within each layer cell.
+	for _, m := range modes {
+		for _, dt := range dtypes {
+			for _, k := range kinds {
+				for _, lr := range lrs {
+					id := fmt.Sprintf("%s|%s|%s|lr=%s", k, dt, m.String(), formatLR(lr))
+					out = append(out, Job{ID: id, Kind: k, DType: dt, Mode: m, LR: lr})
+				}
 			}
 		}
 	}
 	return out
+}
+
+func parseLRList(spec string, once float64) ([]float64, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return []float64{once}, nil
+	}
+	if strings.EqualFold(spec, "funny") || strings.EqualFold(spec, "all") {
+		out := make([]float64, len(defaultFunnyLRs))
+		copy(out, defaultFunnyLRs)
+		return out, nil
+	}
+	var out []float64
+	seen := map[float64]bool{}
+	for _, tok := range strings.FieldsFunc(spec, func(r rune) bool {
+		return r == ',' || r == ' ' || r == ';'
+	}) {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		v, err := parseLRToken(tok)
+		if err != nil {
+			return nil, err
+		}
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no learning rates in %q", spec)
+	}
+	sort.Float64s(out)
+	return out, nil
+}
+
+func parseLRToken(tok string) (float64, error) {
+	low := strings.ToLower(strings.TrimSpace(tok))
+	mult := 1.0
+	switch {
+	case strings.HasSuffix(low, "m"):
+		mult = 1e6
+		low = strings.TrimSuffix(low, "m")
+	case strings.HasSuffix(low, "k"):
+		mult = 1e3
+		low = strings.TrimSuffix(low, "k")
+	}
+	v, err := strconv.ParseFloat(low, 64)
+	if err != nil {
+		return 0, fmt.Errorf("lr %q: %w", tok, err)
+	}
+	return v * mult, nil
+}
+
+func formatLR(lr float64) string {
+	switch {
+	case lr == 0:
+		return "0"
+	case lr >= 1e6 && lr == float64(int64(lr/1e6))*1e6:
+		return fmt.Sprintf("%dm", int64(lr/1e6))
+	case lr >= 1e3 && lr == float64(int64(lr/1e3))*1e3:
+		return fmt.Sprintf("%dk", int64(lr/1e3))
+	default:
+		return strconv.FormatFloat(lr, 'g', -1, 64)
+	}
+}
+
+func lrsCSV(lrs []float64) string {
+	parts := make([]string, len(lrs))
+	for i, lr := range lrs {
+		parts[i] = formatLR(lr)
+	}
+	return strings.Join(parts, ",")
 }
 
 func parseModeList(spec string) ([]parallel.TrainMode, error) {
@@ -273,9 +363,10 @@ func parseModeList(spec string) ([]parallel.TrainMode, error) {
 	return out, nil
 }
 
-func runJob(j Job, seed int64, hidden int, dur time.Duration, lr float64) modeResult {
+func runJob(j Job, seed int64, hidden int, dur time.Duration) modeResult {
+	lr := j.LR
 	r := modeResult{
-		ID: j.ID, Layer: string(j.Kind), DType: j.DType.String(), Mode: j.Mode.String(),
+		ID: j.ID, Layer: string(j.Kind), DType: j.DType.String(), Mode: j.Mode.String(), LR: lr,
 	}
 	st, err := buildSandwich(j.Kind, obsDim, hidden, nActs, j.DType)
 	if err != nil {
@@ -421,7 +512,7 @@ func printTopLPD(results []modeResult, n int) {
 	}
 	lpd := lucy.BuildLPD(pts)
 	fmt.Println()
-	fmt.Println("══ LPD top (layer × mode × dtype) ══")
+	fmt.Println("══ LPD top (layer × mode × dtype × lr) ══")
 	if lpd.Champ.ID != "" {
 		fmt.Printf("score-champ  %s  Acc=%.1f Score=%.0f\n", lpd.Champ.ID, lpd.Champ.Acc, lpd.Champ.Score)
 	}

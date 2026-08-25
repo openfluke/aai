@@ -42,7 +42,7 @@ func startTideBridge(addr string, jobs []Job, lr float64) *tideBridge {
 		Addr:     listen,
 		Epoch:    1,
 		Task:     "test53-dayroute",
-		Subtitle: "dayroute · 5-day XY life schedule × layer × mode × dtype",
+		Subtitle: "dayroute · layer × mode × dtype × funny-LR (0…100m)",
 		LR:       lr,
 		ID:       "test53",
 	}

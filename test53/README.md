@@ -1,4 +1,4 @@
-# test53 — dayroute × layer × mode × dtype (MT + Tide + LPD)
+# test53 — dayroute × layer × mode × dtype × funny-LR (MT + Tide + LPD)
 
 Synthetic **human daily life** on an XY grid — not xor / sine / copy / remap.
 
@@ -12,8 +12,11 @@ Repeats **5 days**. Each morning places drift ±1 so the route **moves**.
 Agent picks **1 of 6 actions**: N / S / E / W / ACT / WAIT.
 
 ```
-kind → mode → dtype     (~20 × 29 × 34 ≈ 19.7k jobs)
+kind → mode → dtype → lr↑
+(~20 × 29 × 34 × 8 ≈ 157k jobs)
 ```
+
+Funny LRs: `0, 2, 200, 2000, 20000, 1m, 10m, 100m`
 
 ## Defaults (`go run .`)
 
@@ -22,6 +25,7 @@ kind → mode → dtype     (~20 × 29 × 34 ≈ 19.7k jobs)
 | layers | **all** (dense, mha, lstm, …) |
 | modes | **all 29** named train modes |
 | dtypes | **all 34** |
+| lrs | **funny** (8-step ramp) |
 | workers | NumCPU (or 4 via `.env` / Docker) |
 | duration | 2s/job |
 | Tide | `:8080` |
@@ -41,10 +45,10 @@ Needs sibling `tide/` + `webgpu/` next to `welvet/`.
 
 ```bash
 cd apps/aai/test53
-./run-docker.sh              # build + up -d, restart: always
+./run-docker.sh              # start existing image
+./run-docker.sh --build      # rebuild then start
 ./run-docker.sh --logs
-./run-docker.sh --status
-./run-docker.sh --stop
+./stop.sh
 ```
 
 Data is bind-mounted to **`./test53_ckpt/` on the host** — not stuck in the container:
