@@ -1,0 +1,36 @@
+# test53 dayroute — full layer × mode × dtype LPD matrix + Tide.
+# Checkpoint lives on the HOST (./test53_ckpt), not inside the image.
+#
+#   ./run-docker.sh
+#
+# Build context = parent of welvet/ (needs sibling tide/ + webgpu/).
+
+services:
+  test53:
+    build:
+      context: ../../../..
+      dockerfile: welvet/apps/aai/test53/Dockerfile
+    container_name: test53
+    env_file:
+      - .env
+    environment:
+      TEST53_LAYERS: "${TEST53_LAYERS:-all}"
+      TEST53_MODES: "${TEST53_MODES:-all}"
+      TEST53_DTYPES: "${TEST53_DTYPES:-all}"
+      TEST53_WORKERS: "${TEST53_WORKERS:-4}"
+      TEST53_DURATION: "${TEST53_DURATION:-2s}"
+      TEST53_LR: "${TEST53_LR:-0.05}"
+      TEST53_HIDDEN: "${TEST53_HIDDEN:-32}"
+      TEST53_CKPT: "/app/test53_ckpt"
+      TEST53_RESUME: "true"
+      TEST53_TIDE_ADDR: "0.0.0.0:8080"
+      GOMEMLIMIT: "${GOMEMLIMIT:-6GiB}"
+      GOGC: "${GOGC:-50}"
+    ports:
+      - "${TIDE_PORT:-8080}:8080"
+    volumes:
+      # Host bind — results/lpd/progress survive container rebuilds/crashes.
+      - ./test53_ckpt:/app/test53_ckpt
+    restart: always
+    working_dir: /app
+    mem_limit: ${TEST53_MEM_LIMIT:-7g}
