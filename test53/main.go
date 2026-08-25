@@ -153,8 +153,8 @@ func main() {
 	alreadyDone := len(jobs) - len(pending)
 	if tide != nil {
 		tide.seedCompleted(results)
+		tide.resetPace() // ETA from new work only, not instant seed dumps
 		tide.setQueue(alreadyDone, len(jobs), fmt.Sprintf("ready · %d/%d · %d left", alreadyDone, len(jobs), len(pending)))
-		tide.signalStart()
 	}
 
 	if len(pending) == 0 {
@@ -169,8 +169,10 @@ func main() {
 	}
 
 	type leafOut struct {
-		job Job
-		res modeResult
+		job     Job
+		res     modeResult
+		started time.Time
+		ended   time.Time
 	}
 	jobCh := make(chan Job, workers*2)
 	outCh := make(chan leafOut, workers*2)
@@ -186,7 +188,9 @@ func main() {
 					// done-so-far for display = alreadyDone + finished; starting count is approximate
 					tide.beginJob(j, "train", alreadyDone+n-1, len(jobs))
 				}
-				outCh <- leafOut{job: j, res: runJob(j, seed, *hidden, *dur)}
+				t0 := time.Now()
+				res := runJob(j, seed, *hidden, *dur)
+				outCh <- leafOut{job: j, res: res, started: t0, ended: time.Now()}
 			}
 		}(int64(w+1) * 9973)
 	}
@@ -220,10 +224,8 @@ func main() {
 			results = append(results, r)
 		}
 		if tide != nil {
-			// Re-begin with the real job (mode!) then finish so mode_progress.Left ticks down.
-			tide.beginJob(j, "train", doneNow-1, planTotal)
-			tide.pulseRunning(r)
-			tide.finishJob(r)
+			// Commit with real wall times — do not re-Begin (that zeroed ETA).
+			tide.commitJob(j, r, out.started, out.ended)
 			left := planTotal - doneNow
 			tide.setQueue(doneNow, planTotal, fmt.Sprintf("%s · %d/%d · %d left", r.ID, doneNow, planTotal, left))
 		}

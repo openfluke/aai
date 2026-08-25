@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/openfluke/tide/dash"
 	"github.com/openfluke/tide/permute"
@@ -46,6 +47,8 @@ func startTideBridge(addr string, jobs []Job, lr float64) *tideBridge {
 		LR:       lr,
 		ID:       "test53",
 	}
+	// Auto-start: test53 does not wait for the dash Start button.
+	srv.SignalStart()
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
 			fmt.Fprintf(os.Stderr, "tide dash: %v\n", err)
@@ -58,6 +61,12 @@ func startTideBridge(addr string, jobs []Job, lr float64) *tideBridge {
 func (t *tideBridge) signalStart() {
 	if t != nil && t.srv != nil {
 		t.srv.SignalStart()
+	}
+}
+
+func (t *tideBridge) resetPace() {
+	if t != nil && t.srv != nil {
+		t.srv.ResetPaceAnchor()
 	}
 }
 
@@ -120,21 +129,39 @@ func (t *tideBridge) finishJob(r modeResult) {
 	})
 }
 
+// commitJob records a finished job with real wall-clock start/end (multi-worker safe).
+func (t *tideBridge) commitJob(j Job, r modeResult, started, ended time.Time) {
+	if t == nil || t.tr == nil {
+		return
+	}
+	status, note := "ok", r.Layer
+	if r.Err != "" {
+		status, note = "fail", r.Err
+	}
+	t.tr.Commit(jobToTideCell(j), 1, status, note, lucy.Snapshot{
+		AvgAccuracy: r.Acc, SoftAcc: r.Soft, Availability: r.Avail,
+		Throughput: r.Thru, Score: r.Score, TotalOutputs: r.Actions,
+		WeightBytes: int64(r.RAMKiB * 1024),
+	}, started, ended)
+}
+
 func (t *tideBridge) seedCompleted(rows []modeResult) {
 	if t == nil || t.tr == nil {
 		return
 	}
 	n := 0
+	now := time.Now()
 	for _, r := range rows {
 		if r.Err != "" {
 			continue
 		}
-		t.tr.Begin(resultToTideCell(r), "train")
-		t.tr.Finish("ok", r.Layer, lucy.Snapshot{
+		// Seeded rows have no wall duration — Commit with equal times so they
+		// are ignored by pace (minPaceSec filter).
+		t.tr.Commit(resultToTideCell(r), 1, "ok", r.Layer, lucy.Snapshot{
 			AvgAccuracy: r.Acc, SoftAcc: r.Soft, Availability: r.Avail,
 			Throughput: r.Thru, Score: r.Score, TotalOutputs: r.Actions,
 			WeightBytes: int64(r.RAMKiB * 1024),
-		})
+		}, now, now)
 		n++
 	}
 	if n > 0 {
