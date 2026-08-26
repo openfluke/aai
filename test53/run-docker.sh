@@ -2,7 +2,7 @@
 # test53 — compile Go binary, then put ONLY the binary in Docker (tiny context).
 #
 #   ./run-docker.sh              # start existing image
-#   ./run-docker.sh --build      # go build (in golang container) → docker up
+#   ./run-docker.sh --build      # go build (in golang container) → compose up
 #   ./run-docker.sh --logs|--stop|--status|--restart
 set -euo pipefail
 
@@ -20,138 +20,63 @@ if [[ ! -d "$ROOT/tide" || ! -d "$ROOT/webgpu" ]]; then
   exit 1
 fi
 
-docker_ok() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
+# Prefer Colima's official env (fixes "already running" but docker info fails).
+if command -v colima >/dev/null 2>&1; then
+  if colima status 2>/dev/null | grep -qi 'Running'; then
+    # shellcheck disable=SC1090
+    eval "$(colima docker-env 2>/dev/null)" || true
+  fi
+fi
 
-# Colima often runs while DOCKER_HOST still points nowhere — wire the socket.
-wire_colima_docker() {
-  command -v colima >/dev/null 2>&1 || return 1
-  # Prefer colima's own hint when available.
-  local sock=""
-  sock="$(colima ssh -- printenv DOCKER_HOST 2>/dev/null | tr -d '\r' || true)"
-  if [[ -z "$sock" || "$sock" != unix://* ]]; then
-    # Common Colima paths (default profile + named profiles).
-    local cand
-    for cand in \
-      "$HOME/.colima/default/docker.sock" \
-      "$HOME/.colima/docker.sock" \
-      "$HOME/.colima/"*/docker.sock
-    do
-      if [[ -S "$cand" ]]; then
-        sock="unix://$cand"
-        break
-      fi
-    done
-  fi
-  if [[ -n "$sock" ]]; then
-    export DOCKER_HOST="$sock"
-    echo "DOCKER_HOST=$DOCKER_HOST"
-    return 0
-  fi
-  return 1
-}
-
-# Colima / Desktop sometimes needs a kick after stop.
-ensure_docker_daemon() {
-  if docker_ok; then
-    return 0
-  fi
-  # Colima already running but CLI can't see it → set DOCKER_HOST.
-  if command -v colima >/dev/null 2>&1; then
-    if colima status 2>/dev/null | grep -qi 'Running'; then
-      echo "colima is running — wiring DOCKER_HOST"
-      wire_colima_docker || true
-      if docker_ok; then
-        return 0
-      fi
-    else
-      echo "docker daemon not up — trying: colima start"
-      colima start || true
-      wire_colima_docker || true
-    fi
-  fi
-  if command -v docker >/dev/null 2>&1; then
-    open -a Docker 2>/dev/null || true
-  fi
-  local i
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    wire_colima_docker 2>/dev/null || true
-    if docker_ok; then
-      echo "docker daemon ready"
-      return 0
-    fi
-    sleep 2
-  done
-  return 1
-}
-
-pick_engine() {
-  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-    dc() { docker compose --project-name "$PROJECT" "$@"; }
-    drun() { docker run "$@"; }
-    ENGINE=docker
-    return 0
-  fi
-  if command -v sg >/dev/null 2>&1 && sg docker -c 'docker compose version' >/dev/null 2>&1; then
-    dc() { sg docker -c "docker compose --project-name $PROJECT $*"; }
-    drun() { sg docker -c "docker run $*"; }
-    ENGINE=docker-sg
-    return 0
-  fi
-  if command -v docker-compose >/dev/null 2>&1; then
-    dc() { docker-compose --project-name "$PROJECT" "$@"; }
-    drun() { docker run "$@"; }
-    ENGINE=compose-bin
-    return 0
-  fi
-  if podman compose version >/dev/null 2>&1; then
-    systemctl --user start podman.socket 2>/dev/null || true
-    export DOCKER_HOST="${DOCKER_HOST:-unix:///run/user/$(id -u)/podman/podman.sock}"
-    dc() { podman compose --project-name "$PROJECT" "$@"; }
-    drun() { podman run "$@"; }
-    ENGINE=podman
-    return 0
-  fi
-  return 1
-}
-
-# Wire Colima before probing compose — otherwise `docker info` looks "dead".
-wire_colima_docker 2>/dev/null || true
-
-if ! pick_engine; then
-  echo "error: need docker compose OR docker-compose OR podman compose" >&2
-  echo "  have docker?        $(command -v docker || echo no)" >&2
-  echo "  have docker-compose? $(command -v docker-compose || echo no)" >&2
-  echo "  docker info: $(docker info 2>&1 | head -1 || true)" >&2
+# --- compose + docker run ---
+if command -v docker-compose >/dev/null 2>&1; then
+  dc() { docker-compose --project-name "$PROJECT" "$@"; }
+  ENGINE=compose-bin
+elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  dc() { docker compose --project-name "$PROJECT" "$@"; }
+  ENGINE=docker
+elif command -v sg >/dev/null 2>&1 && sg docker -c 'docker compose version' >/dev/null 2>&1; then
+  dc() { sg docker -c "docker compose --project-name $PROJECT $*"; }
+  ENGINE=docker-sg
+elif podman compose version >/dev/null 2>&1; then
+  systemctl --user start podman.socket 2>/dev/null || true
+  export DOCKER_HOST="${DOCKER_HOST:-unix:///run/user/$(id -u)/podman/podman.sock}"
+  dc() { podman compose --project-name "$PROJECT" "$@"; }
+  ENGINE=podman
+else
+  echo "error: need docker-compose or docker compose" >&2
   exit 1
 fi
 
-# Need a live daemon for compile + up (compose-bin used to require this up-front).
+drun() {
+  if [[ "$ENGINE" == docker-sg ]]; then
+    sg docker -c "docker run $*"
+  elif [[ "$ENGINE" == podman* ]]; then
+    podman run "$@"
+  else
+    docker run "$@"
+  fi
+}
+
 if [[ "$ENGINE" != podman* ]]; then
-  if ! ensure_docker_daemon; then
-    echo "error: docker daemon not reachable (start Colima or Docker Desktop)" >&2
-    echo "  tip: colima start   OR   open -a Docker" >&2
+  if ! docker info >/dev/null 2>&1; then
+    echo "error: docker not reachable for compose" >&2
+    echo "  try:  eval \"\$(colima docker-env)\" && docker info" >&2
+    echo "  or:   colima restart" >&2
+    docker info 2>&1 | head -5 >&2 || true
     exit 1
   fi
 fi
 
-# Compile linux binary inside golang image; sources are BIND-MOUNTED (not tarred
-# as build context). Output lands in .bin/test53 — that's all Docker ever sees.
 compile_binary() {
-  echo "compiling linux binary via golang container (bind mounts, no GB context)…"
+  echo "compiling linux binary via golang container (bind mounts)…"
   mkdir -p "$BIN_DIR"
-  # Dockerfile for the runtime image lives next to the binary in .bin/
   cp -f "$DIR/Dockerfile" "$BIN_DIR/Dockerfile"
   cp -f "$DIR/.env.example" "$BIN_DIR/.env.example"
 
-  # Match container platform so the binary runs in debian slim.
-  # (Avoid empty-array expand under macOS bash 3.2 + set -u.)
   local platform=""
-  if docker_ok || [[ "$ENGINE" == docker* ]]; then
-    platform="$(docker version -f '{{.Server.Os}}/{{.Server.Arch}}' 2>/dev/null || true)"
-  fi
+  platform="$(docker version -f '{{.Server.Os}}/{{.Server.Arch}}' 2>/dev/null || true)"
 
-  # Layout inside builder matches go.mod replace paths:
-  #   /src/welvet/apps/aai/test53  +  /src/tide  +  /src/webgpu
   run_compile() {
     drun --rm "$@" \
       -v "$WELVET:/src/welvet:ro" \
@@ -166,7 +91,6 @@ compile_binary() {
       bash -ec '
         apt-get update -qq
         apt-get install -y -qq gcc libc6-dev >/dev/null
-        # Do NOT go mod tidy — welvet is mounted :ro. go.sum must already be committed.
         go build -buildvcs=false -trimpath -ldflags="-s -w" -o /out/test53 .
         ls -lh /out/test53
       '
@@ -177,11 +101,11 @@ compile_binary() {
     run_compile
   fi
 
-  if [[ ! -x "$BIN_DIR/test53" && ! -f "$BIN_DIR/test53" ]]; then
+  if [[ ! -f "$BIN_DIR/test53" ]]; then
     echo "error: compile failed — no $BIN_DIR/test53" >&2
     exit 1
   fi
-  echo "binary ready: $(du -h "$BIN_DIR/test53" | awk '{print $1}') → docker context is just .bin/"
+  echo "binary ready: $(du -h "$BIN_DIR/test53" | awk '{print $1}') → compose context .bin/"
 }
 
 cmd="${1:-up}"
@@ -190,9 +114,6 @@ case "$cmd" in
     if [[ ! -f .env ]]; then
       cp .env.example .env
       echo "wrote .env"
-    fi
-    if [[ "$ENGINE" == podman* ]]; then
-      systemctl --user start podman.socket 2>/dev/null || true
     fi
     if command -v lsof >/dev/null 2>&1; then
       pids=$(lsof -tiTCP:8080 -sTCP:LISTEN 2>/dev/null || true)
