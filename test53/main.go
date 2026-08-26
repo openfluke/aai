@@ -38,6 +38,30 @@ var defaultModesCSV = strings.Join([]string{
 // Funny LR ramp: 0.02 → 2 → 200 → 2k → 20k → 1m → 10m → 100m
 var defaultFunnyLRs = []float64{0.02, 2, 200, 2000, 20000, 1e6, 1e7, 1e8}
 
+func funnyLRs() []float64 {
+	out := make([]float64, len(defaultFunnyLRs))
+	copy(out, defaultFunnyLRs)
+	return out
+}
+
+// Negated funny ramp (same magnitudes, sign flipped).
+func funnyNegLRs() []float64 {
+	out := make([]float64, len(defaultFunnyLRs))
+	for i, v := range defaultFunnyLRs {
+		out[i] = -v
+	}
+	sort.Float64s(out) // -100m … -0.02
+	return out
+}
+
+// Signed funny: negatives then positives (−100m … −0.02, 0.02 … 100m).
+func funnySignedLRs() []float64 {
+	out := make([]float64, 0, len(defaultFunnyLRs)*2)
+	out = append(out, funnyNegLRs()...)
+	out = append(out, funnyLRs()...)
+	return out
+}
+
 type Job struct {
 	ID    string
 	Kind  CellKind
@@ -71,7 +95,8 @@ func main() {
 	modesFlag := flag.String("modes", EnvOr("TEST53_MODES", defaultModesCSV), "csv of train modes")
 	layersFlag := flag.String("layers", EnvOr("TEST53_LAYERS", "all"), "all|csv cell kinds")
 	dtypesFlag := flag.String("dtypes", EnvOr("TEST53_DTYPES", "all"), "all|csv")
-	lrsFlag := flag.String("lrs", EnvOr("TEST53_LRS", "funny"), "funny|all = 0.02…100m sweep, or csv (1m/10m/100m ok); empty = use -lr once")
+	lrsFlag := flag.String("lrs", EnvOr("TEST53_LRS", "funny"),
+		"funny|all = +ramp; funny-neg|neg = −ramp; funny±|pm|signed = both; or csv (−1m,0.02,2 ok); empty = -lr once")
 	workersFlag := flag.Int("workers", EnvInt("TEST53_WORKERS", 0), "0 = NumCPU")
 	dur := flag.Duration("duration", EnvDuration("TEST53_DURATION", 2*time.Second), "wall per job")
 	lrOnce := flag.Float64("lr", EnvFloat("TEST53_LR", 0.05), "single LR when -lrs is empty")
@@ -291,10 +316,13 @@ func parseLRList(spec string, once float64) ([]float64, error) {
 	if spec == "" {
 		return []float64{once}, nil
 	}
-	if strings.EqualFold(spec, "funny") || strings.EqualFold(spec, "all") {
-		out := make([]float64, len(defaultFunnyLRs))
-		copy(out, defaultFunnyLRs)
-		return out, nil
+	switch strings.ToLower(spec) {
+	case "funny", "all", "pos", "+":
+		return funnyLRs(), nil
+	case "funny-neg", "funny_neg", "neg", "negative", "-":
+		return funnyNegLRs(), nil
+	case "funny±", "funny+/-", "funny+-", "pm", "signed", "±", "+/-", "+-":
+		return funnySignedLRs(), nil
 	}
 	var out []float64
 	seen := map[float64]bool{}
@@ -324,6 +352,13 @@ func parseLRList(spec string, once float64) ([]float64, error) {
 
 func parseLRToken(tok string) (float64, error) {
 	low := strings.ToLower(strings.TrimSpace(tok))
+	sign := 1.0
+	if strings.HasPrefix(low, "-") {
+		sign = -1
+		low = strings.TrimPrefix(low, "-")
+	} else if strings.HasPrefix(low, "+") {
+		low = strings.TrimPrefix(low, "+")
+	}
 	mult := 1.0
 	switch {
 	case strings.HasSuffix(low, "m"):
@@ -337,19 +372,25 @@ func parseLRToken(tok string) (float64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("lr %q: %w", tok, err)
 	}
-	return v * mult, nil
+	return sign * v * mult, nil
 }
 
 func formatLR(lr float64) string {
+	sign := ""
+	x := lr
+	if lr < 0 {
+		sign = "-"
+		x = -lr
+	}
 	switch {
-	case lr == 0:
+	case x == 0:
 		return "0"
-	case lr >= 1e6 && lr == float64(int64(lr/1e6))*1e6:
-		return fmt.Sprintf("%dm", int64(lr/1e6))
-	case lr >= 1e3 && lr == float64(int64(lr/1e3))*1e3:
-		return fmt.Sprintf("%dk", int64(lr/1e3))
+	case x >= 1e6 && x == float64(int64(x/1e6))*1e6:
+		return fmt.Sprintf("%s%dm", sign, int64(x/1e6))
+	case x >= 1e3 && x == float64(int64(x/1e3))*1e3:
+		return fmt.Sprintf("%s%dk", sign, int64(x/1e3))
 	default:
-		return strconv.FormatFloat(lr, 'g', -1, 64)
+		return sign + strconv.FormatFloat(x, 'g', -1, 64)
 	}
 }
 

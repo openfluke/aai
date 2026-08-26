@@ -20,6 +20,15 @@ Sweep order: **all modes × dtypes × layers at LR=0.02**, then LR=2, … up to 
 
 Funny LRs: `0.02, 2, 200, 2000, 20000, 1m, 10m, 100m`
 
+Presets via `TEST53_LRS` / `-lrs`:
+
+| Value | Meaning |
+|-------|---------|
+| `funny` / `all` | +ramp (default) |
+| `funny-neg` / `neg` | −ramp only |
+| `funny±` / `pm` / `signed` | −ramp then +ramp |
+| CSV | any list, e.g. `-1m,-0.02,0.02,2` |
+
 ## Defaults (`go run .`)
 
 | Knob | Default |
