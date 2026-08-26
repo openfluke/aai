@@ -1,11 +1,11 @@
-# Build from parent of welvet/ (sibling tide/ + webgpu/):
-#   docker build -f welvet/apps/aai/test53/Dockerfile -t test53 .
+# Build with compose additional_contexts (welvet + tide + webgpu only).
+# Do NOT use parent-of-welvet as a single context — that tars your whole git/ tree.
 FROM golang:1.22-bookworm AS build
 
 WORKDIR /src
-COPY welvet /src/welvet
-COPY tide /src/tide
-COPY webgpu /src/webgpu
+COPY --from=tide . /src/tide
+COPY --from=webgpu . /src/webgpu
+COPY . /src/welvet
 
 WORKDIR /src/welvet/apps/aai/test53
 RUN go mod tidy && GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/test53 .
@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /out/test53 /app/test53
-COPY welvet/apps/aai/test53/.env.example /app/.env.example
+COPY apps/aai/test53/.env.example /app/.env.example
 EXPOSE 8080
 ENV TEST53_LAYERS=all \
     TEST53_MODES=all \

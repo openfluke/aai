@@ -1,0 +1,8 @@
+# If someone builds with context=test53 dir itself
+test53_ckpt
+test53
+test53_*
+.env
+*.log
+*.pdf
+.git

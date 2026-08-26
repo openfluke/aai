@@ -12,9 +12,14 @@ PROJECT=test53
 export TEST53_CKPT_HOST="${TEST53_CKPT_HOST:-$DIR/test53_ckpt}"
 mkdir -p "$TEST53_CKPT_HOST"
 
-ROOT="$(cd "$DIR/../../../.." && pwd)"
-if [[ ! -d "$ROOT/welvet" || ! -d "$ROOT/tide" || ! -d "$ROOT/webgpu" ]]; then
-  echo "error: need siblings welvet/ tide/ webgpu/ under $ROOT" >&2
+# BuildKit required for additional_contexts (tide + webgpu).
+export DOCKER_BUILDKIT=1
+export COMPOSE_DOCKER_CLI_BUILD=1
+
+WELVET="$(cd "$DIR/../../.." && pwd)"
+ROOT="$(cd "$WELVET/.." && pwd)"
+if [[ ! -d "$ROOT/tide" || ! -d "$ROOT/webgpu" ]]; then
+  echo "error: need siblings tide/ webgpu/ next to welvet/ under $ROOT" >&2
   exit 1
 fi
 
@@ -22,6 +27,9 @@ fi
 if docker info >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   dc() { docker compose --project-name "$PROJECT" "$@"; }
   ENGINE=docker
+elif command -v sg >/dev/null 2>&1 && sg docker -c 'docker info' >/dev/null 2>&1; then
+  dc() { sg docker -c "docker compose --project-name $PROJECT $*"; }
+  ENGINE=docker-sg
 elif podman compose version >/dev/null 2>&1; then
   systemctl --user start podman.socket 2>/dev/null || true
   export DOCKER_HOST="${DOCKER_HOST:-unix:///run/user/$(id -u)/podman/podman.sock}"
@@ -37,6 +45,14 @@ else
   echo "       then: sudo systemctl enable --now docker && sudo usermod -aG docker \$USER" >&2
   exit 1
 fi
+
+# Keep sibling contexts small (written next to tide/webgpu; safe if already present).
+ensure_sibling_dockerignore() {
+  local path="$1" body="$2"
+  if [[ ! -f "$path" ]] || ! grep -q 'test53-docker-slim' "$path" 2>/dev/null; then
+    printf '%s\n' "$body" >"$path"
+  fi
+}
 
 cmd="${1:-up}"
 case "$cmd" in
@@ -62,6 +78,25 @@ case "$cmd" in
     echo "engine=$ENGINE"
     # Default: start existing image. Pass --build only when source changed.
     if [[ "$cmd" == "--build" || "$cmd" == "build" ]]; then
+      # Slim dockerignores so BuildKit does not tar flawbot/node_modules/etc.
+      ensure_sibling_dockerignore "$ROOT/tide/.dockerignore" "# test53-docker-slim
+.git
+**/.git
+**/node_modules
+**/*.log"
+      ensure_sibling_dockerignore "$ROOT/webgpu/.dockerignore" "# test53-docker-slim
+.git
+**/.git
+**/node_modules
+**/examples
+wgpu/lib/android
+wgpu/lib/darwin
+wgpu/lib/ios
+wgpu/lib/windows"
+      echo "build contexts (should be MBs, not GBs of ~/git):"
+      echo "  welvet  $WELVET  (filtered by welvet/.dockerignore)"
+      echo "  tide    $ROOT/tide"
+      echo "  webgpu  $ROOT/webgpu"
       dc up --build -d
     else
       dc up -d

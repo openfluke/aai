@@ -3,13 +3,16 @@
 #
 #   ./run-docker.sh
 #
-# Build context = parent of welvet/ (needs sibling tide/ + webgpu/).
+# Build contexts are ONLY welvet + tide + webgpu (not the whole ~/git tree).
 
 services:
   test53:
     build:
-      context: ../../../..
-      dockerfile: welvet/apps/aai/test53/Dockerfile
+      context: ../../..
+      dockerfile: apps/aai/test53/Dockerfile
+      additional_contexts:
+        tide: ../../../../tide
+        webgpu: ../../../../webgpu
     container_name: test53
     env_file:
       - .env
