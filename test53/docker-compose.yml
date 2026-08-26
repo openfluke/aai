@@ -1,18 +1,16 @@
 # test53 dayroute — layer × mode × dtype × funny-LR LPD matrix + Tide.
 # Checkpoint lives on the HOST (./test53_ckpt), not inside the image.
 #
-#   ./run-docker.sh
+#   ./run-docker.sh --build   # packs slim .build-ctx then builds
+#   ./run-docker.sh           # start existing image
 #
-# Build contexts are ONLY welvet + tide + webgpu (not the whole ~/git tree).
+# Build context is ./.build-ctx (welvet+tide+webgpu only) — NOT ~/git.
 
 services:
   test53:
     build:
-      context: ../../..
-      dockerfile: apps/aai/test53/Dockerfile
-      additional_contexts:
-        tide: ../../../../tide
-        webgpu: ../../../../webgpu
+      context: .build-ctx
+      dockerfile: Dockerfile
     container_name: test53
     env_file:
       - .env

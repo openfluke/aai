@@ -2,7 +2,7 @@
 # test53 dayroute — Docker or Podman Compose. ckpt on host ./test53_ckpt
 #
 #   ./run-docker.sh              # start existing image (fast)
-#   ./run-docker.sh --build      # rebuild image then start
+#   ./run-docker.sh --build      # slim staging ctx + rebuild + start
 #   ./run-docker.sh --logs|--stop|--status|--restart
 set -euo pipefail
 
@@ -12,9 +12,8 @@ PROJECT=test53
 export TEST53_CKPT_HOST="${TEST53_CKPT_HOST:-$DIR/test53_ckpt}"
 mkdir -p "$TEST53_CKPT_HOST"
 
-# BuildKit required for additional_contexts (tide + webgpu).
-export DOCKER_BUILDKIT=1
-export COMPOSE_DOCKER_CLI_BUILD=1
+export DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"
+export COMPOSE_DOCKER_CLI_BUILD="${COMPOSE_DOCKER_CLI_BUILD:-1}"
 
 WELVET="$(cd "$DIR/../../.." && pwd)"
 ROOT="$(cd "$WELVET/.." && pwd)"
@@ -23,12 +22,11 @@ if [[ ! -d "$ROOT/tide" || ! -d "$ROOT/webgpu" ]]; then
   exit 1
 fi
 
-# Prefer real Docker when the daemon is reachable; else Podman (Fedora).
 if docker info >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   dc() { docker compose --project-name "$PROJECT" "$@"; }
   ENGINE=docker
 elif command -v sg >/dev/null 2>&1 && sg docker -c 'docker info' >/dev/null 2>&1; then
-  dc() { sg docker -c "docker compose --project-name $PROJECT $*"; }
+  dc() { sg docker -c "DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose --project-name $PROJECT $*"; }
   ENGINE=docker-sg
 elif podman compose version >/dev/null 2>&1; then
   systemctl --user start podman.socket 2>/dev/null || true
@@ -36,22 +34,60 @@ elif podman compose version >/dev/null 2>&1; then
   dc() { podman compose --project-name "$PROJECT" "$@"; }
   ENGINE=podman
 elif command -v docker-compose >/dev/null 2>&1; then
-  export DOCKER_HOST="${DOCKER_HOST:-unix:///run/user/$(id -u)/podman/podman.sock}"
-  dc() { docker-compose --project-name "$PROJECT" "$@"; }
+  dc() { DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose --project-name "$PROJECT" "$@"; }
   ENGINE=compose-bin
 else
   echo "error: need docker compose or podman compose" >&2
-  echo "  Fedora:  sudo dnf install -y moby-engine docker-cli docker-compose docker-compose-switch" >&2
-  echo "       then: sudo systemctl enable --now docker && sudo usermod -aG docker \$USER" >&2
   exit 1
 fi
 
-# Keep sibling contexts small (written next to tide/webgpu; safe if already present).
-ensure_sibling_dockerignore() {
-  local path="$1" body="$2"
-  if [[ ! -f "$path" ]] || ! grep -q 'test53-docker-slim' "$path" 2>/dev/null; then
-    printf '%s\n' "$body" >"$path"
+# Pack only what the image needs into .build-ctx/ (classic builder safe).
+pack_build_ctx() {
+  local stage="$DIR/.build-ctx"
+  echo "packing slim build context → $stage"
+  rm -rf "$stage"
+  mkdir -p "$stage/welvet" "$stage/tide" "$stage/webgpu"
+
+  # welvet: library sources + test53 only (skip other apps / site / ckpts)
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a \
+      --exclude '.git/' \
+      --exclude 'node_modules/' \
+      --exclude 'openfluke.github.io/' \
+      --exclude 'apps/' \
+      --exclude '*_ckpt/' \
+      --exclude '*.log' \
+      --exclude '.env' \
+      "$WELVET"/ "$stage/welvet/"
+    mkdir -p "$stage/welvet/apps/aai"
+    rsync -a \
+      --exclude 'test53_ckpt/' \
+      --exclude '.build-ctx/' \
+      --exclude 'test53' \
+      --exclude 'test53_*' \
+      --exclude '.env' \
+      --exclude '*.log' \
+      "$DIR"/ "$stage/welvet/apps/aai/test53/"
+    rsync -a --exclude '.git/' --exclude 'node_modules/' --exclude '*.log' \
+      "$ROOT/tide"/ "$stage/tide/"
+    rsync -a \
+      --exclude '.git/' \
+      --exclude 'node_modules/' \
+      --exclude 'examples/' \
+      --exclude 'wgpu/lib/android/' \
+      --exclude 'wgpu/lib/darwin/' \
+      --exclude 'wgpu/lib/ios/' \
+      --exclude 'wgpu/lib/windows/' \
+      "$ROOT/webgpu"/ "$stage/webgpu/"
+  else
+    echo "error: rsync required to pack slim context (brew install rsync)" >&2
+    exit 1
   fi
+
+  cp "$DIR/Dockerfile" "$stage/Dockerfile"
+  local bytes
+  bytes=$(du -sk "$stage" | awk '{print $1}')
+  echo "packed ${bytes} KiB (≈ $(awk -v b="$bytes" 'BEGIN{printf "%.1f", b/1024}') MiB) — not GBs of ~/git"
 }
 
 cmd="${1:-up}"
@@ -62,7 +98,6 @@ case "$cmd" in
       echo "wrote .env (layers=all modes=all dtypes=all workers=4)"
     fi
     mkdir -p "$TEST53_CKPT_HOST"
-    # Rootless podman socket (no-op if docker engine is up).
     if [[ "$ENGINE" == podman* ]]; then
       systemctl --user start podman.socket 2>/dev/null || true
     fi
@@ -76,29 +111,14 @@ case "$cmd" in
       fi
     fi
     echo "engine=$ENGINE"
-    # Default: start existing image. Pass --build only when source changed.
     if [[ "$cmd" == "--build" || "$cmd" == "build" ]]; then
-      # Slim dockerignores so BuildKit does not tar flawbot/node_modules/etc.
-      ensure_sibling_dockerignore "$ROOT/tide/.dockerignore" "# test53-docker-slim
-.git
-**/.git
-**/node_modules
-**/*.log"
-      ensure_sibling_dockerignore "$ROOT/webgpu/.dockerignore" "# test53-docker-slim
-.git
-**/.git
-**/node_modules
-**/examples
-wgpu/lib/android
-wgpu/lib/darwin
-wgpu/lib/ios
-wgpu/lib/windows"
-      echo "build contexts (should be MBs, not GBs of ~/git):"
-      echo "  welvet  $WELVET  (filtered by welvet/.dockerignore)"
-      echo "  tide    $ROOT/tide"
-      echo "  webgpu  $ROOT/webgpu"
+      pack_build_ctx
       dc up --build -d
     else
+      if [[ ! -d .build-ctx ]]; then
+        echo "no .build-ctx yet — packing once so compose has a context"
+        pack_build_ctx
+      fi
       dc up -d
     fi
     echo
@@ -106,7 +126,7 @@ wgpu/lib/windows"
     echo "  tide  http://localhost:${TIDE_PORT:-8080}"
     echo "  ckpt  $TEST53_CKPT_HOST/   (HOST bind — survives rebuild)"
     if [[ -f "$TEST53_CKPT_HOST/progress.json" ]]; then
-      echo "  resume data present ($(wc -l < "$TEST53_CKPT_HOST/progress.json" 2>/dev/null || echo 0) lines in progress.json)"
+      echo "  resume data present"
     fi
     echo "  logs  ./run-docker.sh --logs"
     echo "  rebuild  ./run-docker.sh --build"
