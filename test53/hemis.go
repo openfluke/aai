@@ -36,16 +36,17 @@ func allKinds() []CellKind {
 	return append([]CellKind{KindDense}, allKindsExceptDense()...)
 }
 
-// allKindsExceptDense is every cameral kind except Dense / embedding.
+// allKindsExceptDense is the default mid-Op set (no Dense / embedding).
+// Softmax / kmeans / metacognition / sequential stay buildable via CSV but
+// are omitted from "all" — low signal for dayroute LPD.
 func allKindsExceptDense() []CellKind {
 	return []CellKind{
 		KindCNN1, KindCNN2, KindCNN3,
 		KindConvT1, KindConvT2, KindConvT3,
 		KindMHA, KindLSTM, KindRNN,
 		KindMamba, KindGDN, KindSwiGLU,
-		KindResidual, KindSequential,
-		KindSoftmax, KindLayerNorm, KindRMSNorm,
-		KindKMeans, KindMetacognition,
+		KindResidual,
+		KindLayerNorm, KindRMSNorm,
 	}
 }
 

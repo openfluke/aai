@@ -13,18 +13,26 @@ Agent picks **1 of 6 actions**: N / S / E / W / ACT / WAIT.
 
 ```
 lr↑ → mode → dtype → kind
-(~8 × 29 × 34 × 20 ≈ 157k jobs)
+(~4 × 29 × 34 × 16 ≈ 63k jobs per half; lo or hi)
 ```
+Default `all` layers drop softmax, kmeans, metacognition, sequential (still
+selectable by CSV). Embedding stays skipped.
 
-Sweep order: **all modes × dtypes × layers at LR=0.02**, then LR=2, … up to 100m.
+Funny LRs are split across two farms:
 
-Funny LRs: `0.02, 2, 200, 2000, 20000, 1m, 10m, 100m`
+| Script | LRs | Tide | Ckpt |
+|--------|-----|------|------|
+| `./run-docker-lo.sh` | `0.02, 2, 200, 2000` | `:8080` | `test53_ckpt/` |
+| `./run-docker-hi.sh` | `20000, 1m, 10m, 100m` | `:8082` | `test53_ckpt_hi/` |
+| `./run-docker-neg.sh` | −ramp | `:8081` | `test53_ckpt_neg/` |
 
 Presets via `TEST53_LRS` / `-lrs`:
 
 | Value | Meaning |
 |-------|---------|
-| `funny` / `all` | +ramp (default) |
+| `funny-lo` / `lo` | mild half (default) |
+| `funny-hi` / `hi` | extreme half |
+| `funny` / `all` | full +ramp (lo+hi) |
 | `funny-neg` / `neg` | −ramp only |
 | `funny±` / `pm` / `signed` | −ramp then +ramp |
 | CSV | any list, e.g. `-1m,-0.02,0.02,2` |
@@ -33,10 +41,10 @@ Presets via `TEST53_LRS` / `-lrs`:
 
 | Knob | Default |
 |------|---------|
-| layers | **all** (dense, mha, lstm, …) |
+| layers | **all** (16: dense…rmsnorm; no softmax/kmeans/metacognition/sequential) |
 | modes | **all 29** named train modes |
 | dtypes | **all 34** |
-| lrs | **funny** (8-step ramp) |
+| lrs | **funny-lo** (0.02…2k; use `./run-docker-hi.sh` for extremes) |
 | workers | NumCPU (or 4 via `.env` / Docker) |
 | duration | 2s/job |
 | Tide | `:8080` |
@@ -69,14 +77,14 @@ Needs sibling `tide/` + `webgpu/` next to `welvet/`.
 
 ```bash
 cd apps/aai/test53
-./run-docker.sh --build   # go build in golang container → tiny image (binary only)
-./run-docker.sh           # start existing image
-./run-docker.sh --logs
-./run-docker.sh --stop
+./run-docker-lo.sh --build    # mild LRs → :8080
+./run-docker-hi.sh --build    # extreme LRs → :8082
+./run-docker-lo.sh --logs
+./stop-lo.sh                  # or ./run-docker-lo.sh --stop
 ```
 
 `--build` **compiles first** (sources bind-mounted into a golang container — not uploaded as context), then Docker only receives `.bin/test53` (tens of MB, not GBs).
 
-Data bind-mount: **`./test53_ckpt/` on the host**.
+Data bind-mount: **`./test53_ckpt/`** (lo) / **`./test53_ckpt_hi/`** (hi) on the host.
 
-Tide: `http://localhost:8080`
+Tide: lo `http://localhost:8080` · hi `http://localhost:8082`

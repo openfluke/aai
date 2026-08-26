@@ -14,7 +14,7 @@ services:
       TEST53_LAYERS: "${TEST53_LAYERS:-all}"
       TEST53_MODES: "${TEST53_MODES:-all}"
       TEST53_DTYPES: "${TEST53_DTYPES:-all}"
-      TEST53_LRS: "${TEST53_LRS:-funny}"
+      TEST53_LRS: "${TEST53_LRS:-funny-lo}"
       TEST53_WORKERS: "${TEST53_WORKERS:-4}"
       TEST53_DURATION: "${TEST53_DURATION:-2s}"
       TEST53_LR: "${TEST53_LR:-0.05}"

@@ -11,7 +11,7 @@ cd "$DIR"
 PROJECT="${TEST53_PROJECT:-test53}"
 BIN_DIR="$DIR/.bin"
 export TEST53_CKPT_HOST="${TEST53_CKPT_HOST:-$DIR/test53_ckpt}"
-export TEST53_LRS="${TEST53_LRS:-funny}"
+export TEST53_LRS="${TEST53_LRS:-funny-lo}"
 export TIDE_PORT="${TIDE_PORT:-8080}"
 mkdir -p "$TEST53_CKPT_HOST" "$BIN_DIR"
 

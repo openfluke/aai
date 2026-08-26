@@ -1,0 +1,7 @@
+# Override for mild funny-LR farm (./run-docker-lo.sh).
+services:
+  test53:
+    container_name: test53-lo
+    image: test53:local
+    environment:
+      TEST53_LRS: "${TEST53_LRS:-funny-lo}"

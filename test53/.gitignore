@@ -5,3 +5,4 @@ test53_ckpt_neg/
 *.log
 .env
 test53
+.gocache

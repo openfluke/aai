@@ -38,9 +38,27 @@ var defaultModesCSV = strings.Join([]string{
 // Funny LR ramp: 0.02 → 2 → 200 → 2k → 20k → 1m → 10m → 100m
 var defaultFunnyLRs = []float64{0.02, 2, 200, 2000, 20000, 1e6, 1e7, 1e8}
 
+// Mild half (./run-docker-lo.sh).
+var funnyLoLRs = []float64{0.02, 2, 200, 2000}
+
+// Extreme half (./run-docker-hi.sh).
+var funnyHiLRs = []float64{20000, 1e6, 1e7, 1e8}
+
 func funnyLRs() []float64 {
 	out := make([]float64, len(defaultFunnyLRs))
 	copy(out, defaultFunnyLRs)
+	return out
+}
+
+func funnyLo() []float64 {
+	out := make([]float64, len(funnyLoLRs))
+	copy(out, funnyLoLRs)
+	return out
+}
+
+func funnyHi() []float64 {
+	out := make([]float64, len(funnyHiLRs))
+	copy(out, funnyHiLRs)
 	return out
 }
 
@@ -95,8 +113,8 @@ func main() {
 	modesFlag := flag.String("modes", EnvOr("TEST53_MODES", defaultModesCSV), "csv of train modes")
 	layersFlag := flag.String("layers", EnvOr("TEST53_LAYERS", "all"), "all|csv cell kinds")
 	dtypesFlag := flag.String("dtypes", EnvOr("TEST53_DTYPES", "all"), "all|csv")
-	lrsFlag := flag.String("lrs", EnvOr("TEST53_LRS", "funny"),
-		"funny|all = +ramp; funny-neg|neg = −ramp; funny±|pm|signed = both; or csv (−1m,0.02,2 ok); empty = -lr once")
+	lrsFlag := flag.String("lrs", EnvOr("TEST53_LRS", "funny-lo"),
+		"funny-lo|lo = 0.02…2k; funny-hi|hi = 20k…100m; funny|all = full +ramp; funny-neg|neg; funny±|pm; or csv; empty = -lr once")
 	workersFlag := flag.Int("workers", EnvInt("TEST53_WORKERS", 0), "0 = NumCPU")
 	dur := flag.Duration("duration", EnvDuration("TEST53_DURATION", 2*time.Second), "wall per job")
 	lrOnce := flag.Float64("lr", EnvFloat("TEST53_LR", 0.05), "single LR when -lrs is empty")
@@ -317,6 +335,10 @@ func parseLRList(spec string, once float64) ([]float64, error) {
 		return []float64{once}, nil
 	}
 	switch strings.ToLower(spec) {
+	case "funny-lo", "funny_lo", "lo", "mild", "low":
+		return funnyLo(), nil
+	case "funny-hi", "funny_hi", "hi", "high", "extreme":
+		return funnyHi(), nil
 	case "funny", "all", "pos", "+":
 		return funnyLRs(), nil
 	case "funny-neg", "funny_neg", "neg", "negative", "-":

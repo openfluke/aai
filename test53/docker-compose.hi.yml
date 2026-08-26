@@ -1,0 +1,8 @@
+# Override for extreme funny-LR farm (./run-docker-hi.sh).
+# Port comes from TIDE_PORT (default 8082 via the wrapper).
+services:
+  test53:
+    container_name: test53-hi
+    image: test53:local
+    environment:
+      TEST53_LRS: "${TEST53_LRS:-funny-hi}"
