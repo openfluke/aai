@@ -58,16 +58,14 @@ Needs sibling `tide/` + `webgpu/` next to `welvet/`.
 
 ```bash
 cd apps/aai/test53
-./run-docker.sh              # start existing image
-./run-docker.sh --build      # rebuild then start
+./run-docker.sh --build   # go build in golang container → tiny image (binary only)
+./run-docker.sh           # start existing image
 ./run-docker.sh --logs
-./stop.sh
+./run-docker.sh --stop
 ```
 
-Data is bind-mounted to **`./test53_ckpt/` on the host** — not stuck in the container:
+`--build` **compiles first** (sources bind-mounted into a golang container — not uploaded as context), then Docker only receives `.bin/test53` (tens of MB, not GBs).
 
-```
-test53_ckpt/{progress,results,lpd,history}.json
-```
+Data bind-mount: **`./test53_ckpt/` on the host**.
 
 Tide: `http://localhost:8080`

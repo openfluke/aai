@@ -1,16 +1,12 @@
-# test53 dayroute — layer × mode × dtype × funny-LR LPD matrix + Tide.
-# Checkpoint lives on the HOST (./test53_ckpt), not inside the image.
-#
-#   ./run-docker.sh --build   # packs slim .build-ctx then builds
-#   ./run-docker.sh           # start existing image
-#
-# Build context is ./.build-ctx (welvet+tide+webgpu only) — NOT ~/git.
+# test53 — runtime image only. ./run-docker.sh --build compiles the Go binary
+# first, then this compose copies just that binary (tiny context, no source tree).
 
 services:
   test53:
     build:
-      context: .build-ctx
+      context: .bin
       dockerfile: Dockerfile
+    image: test53:local
     container_name: test53
     env_file:
       - .env
@@ -31,8 +27,6 @@ services:
     ports:
       - "${TIDE_PORT:-8080}:8080"
     volumes:
-      # Absolute host path — survives image rebuilds / container recreate.
-      # :z = SELinux relabel (Fedora). Never docker compose down -v.
       - ${TEST53_CKPT_HOST:-./test53_ckpt}:/app/test53_ckpt:z
     restart: always
     working_dir: /app

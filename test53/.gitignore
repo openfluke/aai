@@ -1,5 +1,6 @@
 test53_ckpt/
 .build-ctx/
+.bin/
 *.log
 .env
 test53
