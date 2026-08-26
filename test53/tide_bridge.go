@@ -20,7 +20,7 @@ type tideBridge struct {
 	srv *dash.Server
 }
 
-func startTideBridge(addr string, jobs []Job, lr float64) *tideBridge {
+func startTideBridge(addr string, jobs []Job, lr float64, kinds []CellKind) *tideBridge {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
 		return nil
@@ -37,13 +37,17 @@ func startTideBridge(addr string, jobs []Job, lr float64) *tideBridge {
 		cells = append(cells, c)
 	}
 	tr := pulse.New()
+	subtitle := "dayroute · layer × mode × dtype × funny-LR"
+	if len(kinds) == 1 {
+		subtitle = fmt.Sprintf("dayroute · %s × mode × dtype × funny-LR", kinds[0])
+	}
 	srv := &dash.Server{
 		Tracker:  tr,
 		Cells:    cells,
 		Addr:     listen,
 		Epoch:    1,
 		Task:     "test53-dayroute",
-		Subtitle: "dayroute · layer × mode × dtype × funny-LR (0.02…100m)",
+		Subtitle: subtitle,
 		LR:       lr,
 		ID:       "test53",
 	}

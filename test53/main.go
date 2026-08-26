@@ -111,7 +111,7 @@ func main() {
 	LoadDotEnv(".env")
 
 	modesFlag := flag.String("modes", EnvOr("TEST53_MODES", defaultModesCSV), "csv of train modes")
-	layersFlag := flag.String("layers", EnvOr("TEST53_LAYERS", "all"), "all|csv cell kinds")
+	layersFlag := flag.String("layers", EnvOr("TEST53_LAYERS", EnvOr("TEST53_LAYER", "dense")), "one layer or all|csv cell kinds")
 	dtypesFlag := flag.String("dtypes", EnvOr("TEST53_DTYPES", "all"), "all|csv")
 	lrsFlag := flag.String("lrs", EnvOr("TEST53_LRS", "funny-lo"),
 		"funny-lo|lo = 0.02…2k; funny-hi|hi = 20k…100m; funny|all = full +ramp; funny-neg|neg; funny±|pm; or csv; empty = -lr once")
@@ -133,6 +133,8 @@ func main() {
 	lrs, err := parseLRList(*lrsFlag, *lrOnce)
 	must(err)
 
+	ckptPath := resolveCkpt(*ckpt, kinds)
+
 	workers := *workersFlag
 	if workers <= 0 {
 		workers = runtime.NumCPU()
@@ -152,9 +154,9 @@ func main() {
 		len(kinds), len(modes), len(dtypes), len(lrs), len(jobs), workers, leafMultiCore, *dur)
 	fmt.Printf("kinds=%s\n", kindsCSV(kinds))
 	fmt.Printf("lrs=%s\n", lrsCSV(lrs))
-	fmt.Printf("clock=%s  ckpt=%s\n\n", dutyClockName(), *ckpt)
+	fmt.Printf("clock=%s  ckpt=%s\n\n", dutyClockName(), ckptPath)
 
-	store := NewStore(*ckpt)
+	store := NewStore(ckptPath)
 	prog, err := store.Load()
 	must(err)
 	done := doneSet(prog.DoneIDs)
@@ -192,7 +194,7 @@ func main() {
 	fmt.Printf("resume: done=%d pending=%d  ckpt=%d result(s) on disk\n",
 		len(jobs)-len(pending), len(pending), len(results))
 
-	tide := startTideBridge(*tideAddr, jobs, lrs[0])
+	tide := startTideBridge(*tideAddr, jobs, lrs[0], kinds)
 	alreadyDone := len(jobs) - len(pending)
 	if tide != nil {
 		tide.seedCompleted(results)

@@ -11,7 +11,7 @@ services:
     env_file:
       - .env
     environment:
-      TEST53_LAYERS: "${TEST53_LAYERS:-all}"
+      TEST53_LAYERS: "${TEST53_LAYERS:-dense}"
       TEST53_MODES: "${TEST53_MODES:-all}"
       TEST53_DTYPES: "${TEST53_DTYPES:-all}"
       TEST53_LRS: "${TEST53_LRS:-funny-lo}"
@@ -20,6 +20,7 @@ services:
       TEST53_LR: "${TEST53_LR:-0.05}"
       TEST53_HIDDEN: "${TEST53_HIDDEN:-32}"
       TEST53_CKPT: "/app/test53_ckpt"
+      TEST53_CKPT_FLAT: "true"
       TEST53_RESUME: "true"
       TEST53_TIDE_ADDR: "0.0.0.0:8080"
       GOMEMLIMIT: "${GOMEMLIMIT:-6GiB}"

@@ -13,18 +13,25 @@ Agent picks **1 of 6 actions**: N / S / E / W / ACT / WAIT.
 
 ```
 lr↑ → mode → dtype → kind
-(~4 × 29 × 34 × 16 ≈ 63k jobs per half; lo or hi)
 ```
-Default `all` layers drop softmax, kmeans, metacognition, sequential (still
-selectable by CSV). Embedding stays skipped.
 
-Funny LRs are split across two farms:
+**One layer per run** (~4 × 29 × 34 ≈ **3.9k jobs** per lo/hi half). Finish a layer, stop, start the next:
 
-| Script | LRs | Tide | Ckpt |
-|--------|-----|------|------|
-| `./run-docker-lo.sh` | `0.02, 2, 200, 2000` | `:8080` | `test53_ckpt/` |
-| `./run-docker-hi.sh` | `20000, 1m, 10m, 100m` | `:8082` | `test53_ckpt_hi/` |
-| `./run-docker-neg.sh` | −ramp | `:8081` | `test53_ckpt_neg/` |
+```bash
+./run-docker-lo.sh dense --build
+./run-docker-lo.sh convt2 --build   # own ckpt: test53_ckpt/convt2/
+./stop-lo.sh
+./run-docker-lo.sh mha --build
+./list-layers.sh                    # all 16 default layers
+```
+
+| Script | LRs | Tide | Ckpt root |
+|--------|-----|------|-----------|
+| `./run-docker-lo.sh [layer]` | `0.02, 2, 200, 2000` | `:8080` | `test53_ckpt/<layer>/` |
+| `./run-docker-hi.sh [layer]` | `20000, 1m, 10m, 100m` | `:8082` | `test53_ckpt_hi/<layer>/` |
+| `./run-docker-neg.sh [layer]` | −ramp | `:8081` | `test53_ckpt_neg/<layer>/` |
+
+Default layer is **`dense`** if omitted. Use `TEST53_LAYERS=all` only when you really want all 16 layers in one go (~63k jobs per half).
 
 Presets via `TEST53_LRS` / `-lrs`:
 
@@ -41,24 +48,27 @@ Presets via `TEST53_LRS` / `-lrs`:
 
 | Knob | Default |
 |------|---------|
-| layers | **all** (16: dense…rmsnorm; no softmax/kmeans/metacognition/sequential) |
+| layers | **`dense`** (one layer; set `all` for full matrix) |
 | modes | **all 29** named train modes |
 | dtypes | **all 34** |
 | lrs | **funny-lo** (0.02…2k; use `./run-docker-hi.sh` for extremes) |
 | workers | NumCPU (or 4 via `.env` / Docker) |
 | duration | 2s/job |
 | Tide | `:8080` |
-| resume | true → `test53_ckpt/` on **host** (bind-mounted; survives rebuild) |
+| resume | true → `test53_ckpt/<layer>/` on **host** (bind-mounted; survives rebuild) |
 
-Checkpoint files: `progress.json`, `results.json`, `history.json`, `lpd.json`
+Native runs auto-ckpt to `test53_ckpt/<layer>/` unless `TEST53_CKPT_FLAT=true` (Docker).
+
+Checkpoint files per layer folder: `progress.json`, `results.json`, `history.json`, `lpd.json`
 
 ```bash
-# default host path (set in run-docker.sh):
-apps/aai/test53/test53_ckpt/
+# per-layer host paths (set by run-docker-lo.sh):
+apps/aai/test53/test53_ckpt/dense/
+apps/aai/test53/test53_ckpt/convt2/
 
-# override:
-export TEST53_CKPT_HOST=$HOME/welvet-data/test53_ckpt
-./run-docker.sh --build   # safe — rebuilds image only, ckpt stays on host
+# override entire bind mount:
+export TEST53_CKPT_HOST=$HOME/welvet-data/test53_ckpt/dense
+./run-docker-lo.sh --build
 ```
 
 **Never** run `docker compose down -v` — that drops named volumes (test53 uses a host bind, but still avoid `-v`).
@@ -68,7 +78,8 @@ export TEST53_CKPT_HOST=$HOME/welvet-data/test53_ckpt
 ```bash
 cd apps/aai/test53
 go mod tidy
-go run .
+go run . -layers convt2
+# ckpt → test53_ckpt/convt2/
 ```
 
 ## Docker (ckpt on HOST)
@@ -77,14 +88,13 @@ Needs sibling `tide/` + `webgpu/` next to `welvet/`.
 
 ```bash
 cd apps/aai/test53
-./run-docker-lo.sh --build    # mild LRs → :8080
-./run-docker-hi.sh --build    # extreme LRs → :8082
+./run-docker-lo.sh dense --build
+./run-docker-lo.sh convt2 --build
+./run-docker-hi.sh dense --build
 ./run-docker-lo.sh --logs
 ./stop-lo.sh                  # or ./run-docker-lo.sh --stop
 ```
 
 `--build` **compiles first** (sources bind-mounted into a golang container — not uploaded as context), then Docker only receives `.bin/test53` (tens of MB, not GBs).
-
-Data bind-mount: **`./test53_ckpt/`** (lo) / **`./test53_ckpt_hi/`** (hi) on the host.
 
 Tide: lo `http://localhost:8080` · hi `http://localhost:8082`

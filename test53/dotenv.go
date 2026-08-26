@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -97,4 +98,20 @@ func EnvDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+// resolveCkpt puts single-layer native runs under test53_ckpt/<layer>/.
+// Docker sets TEST53_CKPT_FLAT=true and bind-mounts the layer dir directly.
+func resolveCkpt(base string, kinds []CellKind) string {
+	if EnvBool("TEST53_CKPT_FLAT", false) {
+		return base
+	}
+	if len(kinds) != 1 {
+		return base
+	}
+	sub := string(kinds[0])
+	if filepath.Base(filepath.Clean(base)) == sub {
+		return base
+	}
+	return filepath.Join(base, sub)
 }
