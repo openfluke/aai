@@ -55,35 +55,38 @@ compile_binary() {
   cp -f "$DIR/.env.example" "$BIN_DIR/.env.example"
 
   # Match container platform so the binary runs in debian slim.
+  # (Avoid empty-array expand under macOS bash 3.2 + set -u.)
   local platform=""
   if docker_ok || [[ "$ENGINE" == docker* ]]; then
     platform="$(docker version -f '{{.Server.Os}}/{{.Server.Arch}}' 2>/dev/null || true)"
   fi
-  local plat_args=()
-  if [[ -n "$platform" && "$platform" == */* ]]; then
-    plat_args=(--platform "$platform")
-  fi
 
   # Layout inside builder matches go.mod replace paths:
   #   /src/welvet/apps/aai/test53  +  /src/tide  +  /src/webgpu
-  drun --rm \
-    "${plat_args[@]}" \
-    -v "$WELVET:/src/welvet:ro" \
-    -v "$ROOT/tide:/src/tide:ro" \
-    -v "$ROOT/webgpu:/src/webgpu:ro" \
-    -v "$BIN_DIR:/out" \
-    -w /src/welvet/apps/aai/test53 \
-    -e CGO_ENABLED=1 \
-    -e GOOS=linux \
-    -e GOFLAGS=-mod=readonly \
-    golang:1.22-bookworm \
-    bash -ec '
-      apt-get update -qq
-      apt-get install -y -qq gcc libc6-dev >/dev/null
-      # Do NOT go mod tidy — welvet is mounted :ro. go.sum must already be committed.
-      go build -buildvcs=false -trimpath -ldflags="-s -w" -o /out/test53 .
-      ls -lh /out/test53
-    '
+  run_compile() {
+    drun --rm "$@" \
+      -v "$WELVET:/src/welvet:ro" \
+      -v "$ROOT/tide:/src/tide:ro" \
+      -v "$ROOT/webgpu:/src/webgpu:ro" \
+      -v "$BIN_DIR:/out" \
+      -w /src/welvet/apps/aai/test53 \
+      -e CGO_ENABLED=1 \
+      -e GOOS=linux \
+      -e GOFLAGS=-mod=readonly \
+      golang:1.22-bookworm \
+      bash -ec '
+        apt-get update -qq
+        apt-get install -y -qq gcc libc6-dev >/dev/null
+        # Do NOT go mod tidy — welvet is mounted :ro. go.sum must already be committed.
+        go build -buildvcs=false -trimpath -ldflags="-s -w" -o /out/test53 .
+        ls -lh /out/test53
+      '
+  }
+  if [[ -n "$platform" && "$platform" == */* ]]; then
+    run_compile --platform "$platform"
+  else
+    run_compile
+  fi
 
   if [[ ! -x "$BIN_DIR/test53" && ! -f "$BIN_DIR/test53" ]]; then
     echo "error: compile failed — no $BIN_DIR/test53" >&2
