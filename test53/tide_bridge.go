@@ -43,7 +43,7 @@ func startTideBridge(addr string, jobs []Job, lr float64) *tideBridge {
 		Addr:     listen,
 		Epoch:    1,
 		Task:     "test53-dayroute",
-		Subtitle: "dayroute · layer × mode × dtype × funny-LR (0…100m)",
+		Subtitle: "dayroute · layer × mode × dtype × funny-LR (0.02…100m)",
 		LR:       lr,
 		ID:       "test53",
 	}
@@ -107,11 +107,7 @@ func (t *tideBridge) pulseRunning(r modeResult) {
 	if t == nil || t.tr == nil {
 		return
 	}
-	t.tr.Pulse(lucy.Window{}, lucy.Snapshot{
-		AvgAccuracy: r.Acc, SoftAcc: r.Soft, Availability: r.Avail,
-		Throughput: r.Thru, Score: r.Score, TotalOutputs: r.Actions,
-		WeightBytes: int64(r.RAMKiB * 1024),
-	}, "train")
+	t.tr.Pulse(lucy.Window{}, tideSnap(r), "train")
 }
 
 func (t *tideBridge) finishJob(r modeResult) {
@@ -122,11 +118,7 @@ func (t *tideBridge) finishJob(r modeResult) {
 	if r.Err != "" {
 		status, note = "fail", r.Err
 	}
-	t.tr.Finish(status, note, lucy.Snapshot{
-		AvgAccuracy: r.Acc, SoftAcc: r.Soft, Availability: r.Avail,
-		Throughput: r.Thru, Score: r.Score, TotalOutputs: r.Actions,
-		WeightBytes: int64(r.RAMKiB * 1024),
-	})
+	t.tr.Finish(status, note, tideSnap(r))
 }
 
 // commitJob records a finished job with real wall-clock start/end (multi-worker safe).
@@ -138,11 +130,7 @@ func (t *tideBridge) commitJob(j Job, r modeResult, started, ended time.Time) {
 	if r.Err != "" {
 		status, note = "fail", r.Err
 	}
-	t.tr.Commit(jobToTideCell(j), 1, status, note, lucy.Snapshot{
-		AvgAccuracy: r.Acc, SoftAcc: r.Soft, Availability: r.Avail,
-		Throughput: r.Thru, Score: r.Score, TotalOutputs: r.Actions,
-		WeightBytes: int64(r.RAMKiB * 1024),
-	}, started, ended)
+	t.tr.Commit(jobToTideCell(j), 1, status, note, tideSnap(r), started, ended)
 }
 
 func (t *tideBridge) seedCompleted(rows []modeResult) {
@@ -157,16 +145,48 @@ func (t *tideBridge) seedCompleted(rows []modeResult) {
 		}
 		// Seeded rows have no wall duration — Commit with equal times so they
 		// are ignored by pace (minPaceSec filter).
-		t.tr.Commit(resultToTideCell(r), 1, "ok", r.Layer, lucy.Snapshot{
-			AvgAccuracy: r.Acc, SoftAcc: r.Soft, Availability: r.Avail,
-			Throughput: r.Thru, Score: r.Score, TotalOutputs: r.Actions,
-			WeightBytes: int64(r.RAMKiB * 1024),
-		}, now, now)
+		t.tr.Commit(resultToTideCell(r), 1, "ok", r.Layer, tideSnap(r), now, now)
 		n++
 	}
 	if n > 0 {
 		fmt.Printf("tide: seeded %d completed cell(s)\n", n)
 	}
+}
+
+// tideSnap sends the full Lucy snapshot (AccPerSec / time-to-50 / windows).
+// Stripped Acc/Thru-only snaps left LEARN SPEED empty on the Tide board.
+func tideSnap(r modeResult) lucy.Snapshot {
+	snap := r.Lucy
+	if r.Acc > 0 || snap.AvgAccuracy == 0 {
+		snap.AvgAccuracy = r.Acc
+	}
+	if r.Soft > 0 {
+		snap.SoftAcc = r.Soft
+	}
+	if r.Avail > 0 {
+		snap.Availability = r.Avail
+	}
+	if r.Thru > 0 {
+		snap.Throughput = r.Thru
+	}
+	if r.Score > 0 {
+		snap.Score = r.Score
+	}
+	if r.Actions > 0 {
+		snap.TotalOutputs = r.Actions
+	}
+	if r.RAMKiB > 0 {
+		snap.WeightBytes = int64(r.RAMKiB * 1024)
+	}
+	if snap.Duration > 0 {
+		snap.AccPerSec = snap.AvgAccuracy / snap.Duration.Seconds()
+		mb := float64(snap.WeightBytes) / (1024 * 1024)
+		if mb < 1e-9 {
+			mb = 1e-9
+		}
+		snap.MobileAccPerSec = snap.AccPerSec / mb
+	}
+	return snap
 }
 
 func jobToTideCell(j Job) permute.Cell {

@@ -16,7 +16,9 @@ lr↑ → mode → dtype → kind
 (~8 × 29 × 34 × 20 ≈ 157k jobs)
 ```
 
-Sweep order: **all modes × dtypes × layers at LR=0**, then LR=2, … up to 100m.
+Sweep order: **all modes × dtypes × layers at LR=0.02**, then LR=2, … up to 100m.
+
+Funny LRs: `0.02, 2, 200, 2000, 20000, 1m, 10m, 100m`
 
 ## Defaults (`go run .`)
 

@@ -35,8 +35,8 @@ var defaultModesCSV = strings.Join([]string{
 	"StepTweenSplitHeadProxyAsync", "StepTweenSplitSparse",
 }, ",")
 
-// Funny LR ramp: 0 → 2 → 200 → 2k → 20k → 1m → 10m → 100m
-var defaultFunnyLRs = []float64{0, 2, 200, 2000, 20000, 1e6, 1e7, 1e8}
+// Funny LR ramp: 0.02 → 2 → 200 → 2k → 20k → 1m → 10m → 100m
+var defaultFunnyLRs = []float64{0.02, 2, 200, 2000, 20000, 1e6, 1e7, 1e8}
 
 type Job struct {
 	ID    string
@@ -71,7 +71,7 @@ func main() {
 	modesFlag := flag.String("modes", EnvOr("TEST53_MODES", defaultModesCSV), "csv of train modes")
 	layersFlag := flag.String("layers", EnvOr("TEST53_LAYERS", "all"), "all|csv cell kinds")
 	dtypesFlag := flag.String("dtypes", EnvOr("TEST53_DTYPES", "all"), "all|csv")
-	lrsFlag := flag.String("lrs", EnvOr("TEST53_LRS", "funny"), "funny|all = 0…100m sweep, or csv (1m/10m/100m ok); empty = use -lr once")
+	lrsFlag := flag.String("lrs", EnvOr("TEST53_LRS", "funny"), "funny|all = 0.02…100m sweep, or csv (1m/10m/100m ok); empty = use -lr once")
 	workersFlag := flag.Int("workers", EnvInt("TEST53_WORKERS", 0), "0 = NumCPU")
 	dur := flag.Duration("duration", EnvDuration("TEST53_DURATION", 2*time.Second), "wall per job")
 	lrOnce := flag.Float64("lr", EnvFloat("TEST53_LR", 0.05), "single LR when -lrs is empty")
