@@ -48,19 +48,22 @@ ensure_podman_machine() {
     echo "podman machine init (first time)…"
     podman machine init --cpus 4 --memory 8192 --disk-size 60
   fi
-  # Start if not running.
-  if ! podman machine list --format '{{.Name}} {{.Running}}' 2>/dev/null | grep -qi 'true\|running'; then
-    # Newer podman uses Running column true/false; older prints differently.
-    if ! podman info >/dev/null 2>&1; then
-      echo "podman machine start…"
-      podman machine start
-    fi
-  fi
-  if ! podman info >/dev/null 2>&1; then
+  start_podman_machine() {
     echo "podman machine start…"
     podman machine start
+  }
+  if ! podman info >/dev/null 2>&1; then
+    start_podman_machine
   fi
-  podman info >/dev/null
+  if ! podman info >/dev/null 2>&1; then
+    echo "podman still unreachable — restarting machine…" >&2
+    podman machine stop 2>/dev/null || true
+    start_podman_machine
+  fi
+  if ! podman info >/dev/null 2>&1; then
+    echo "error: podman machine not reachable (try: podman machine start && podman info)" >&2
+    exit 1
+  fi
 }
 
 ensure_podman_compose() {
