@@ -20,29 +20,77 @@ if [[ ! -d "$ROOT/tide" || ! -d "$ROOT/webgpu" ]]; then
   exit 1
 fi
 
-docker_ok() { docker info >/dev/null 2>&1; }
+docker_ok() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
 
-if docker_ok && docker compose version >/dev/null 2>&1; then
-  dc() { docker compose --project-name "$PROJECT" "$@"; }
-  drun() { docker run "$@"; }
-  ENGINE=docker
-elif command -v sg >/dev/null 2>&1 && sg docker -c 'docker info' >/dev/null 2>&1; then
-  dc() { sg docker -c "docker compose --project-name $PROJECT $*"; }
-  drun() { sg docker -c "docker run $*"; }
-  ENGINE=docker-sg
-elif podman compose version >/dev/null 2>&1; then
-  systemctl --user start podman.socket 2>/dev/null || true
-  export DOCKER_HOST="${DOCKER_HOST:-unix:///run/user/$(id -u)/podman/podman.sock}"
-  dc() { podman compose --project-name "$PROJECT" "$@"; }
-  drun() { podman run "$@"; }
-  ENGINE=podman
-elif command -v docker-compose >/dev/null 2>&1 && docker_ok; then
-  dc() { docker-compose --project-name "$PROJECT" "$@"; }
-  drun() { docker run "$@"; }
-  ENGINE=compose-bin
-else
-  echo "error: need docker (or podman) compose" >&2
+# Colima / Desktop sometimes needs a kick after stop.
+ensure_docker_daemon() {
+  if docker_ok; then
+    return 0
+  fi
+  if command -v colima >/dev/null 2>&1; then
+    echo "docker daemon not up — trying: colima start"
+    colima start || true
+  fi
+  if command -v docker >/dev/null 2>&1; then
+    # last resort: docker desktop CLI
+    open -a Docker 2>/dev/null || true
+  fi
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    if docker_ok; then
+      echo "docker daemon ready"
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+pick_engine() {
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    dc() { docker compose --project-name "$PROJECT" "$@"; }
+    drun() { docker run "$@"; }
+    ENGINE=docker
+    return 0
+  fi
+  if command -v sg >/dev/null 2>&1 && sg docker -c 'docker compose version' >/dev/null 2>&1; then
+    dc() { sg docker -c "docker compose --project-name $PROJECT $*"; }
+    drun() { sg docker -c "docker run $*"; }
+    ENGINE=docker-sg
+    return 0
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    dc() { docker-compose --project-name "$PROJECT" "$@"; }
+    drun() { docker run "$@"; }
+    ENGINE=compose-bin
+    return 0
+  fi
+  if podman compose version >/dev/null 2>&1; then
+    systemctl --user start podman.socket 2>/dev/null || true
+    export DOCKER_HOST="${DOCKER_HOST:-unix:///run/user/$(id -u)/podman/podman.sock}"
+    dc() { podman compose --project-name "$PROJECT" "$@"; }
+    drun() { podman run "$@"; }
+    ENGINE=podman
+    return 0
+  fi
+  return 1
+}
+
+if ! pick_engine; then
+  echo "error: need docker compose OR docker-compose OR podman compose" >&2
+  echo "  have docker?        $(command -v docker || echo no)" >&2
+  echo "  have docker-compose? $(command -v docker-compose || echo no)" >&2
+  echo "  docker info: $(docker info 2>&1 | head -1 || true)" >&2
   exit 1
+fi
+
+# Need a live daemon for compile + up (compose-bin used to require this up-front).
+if [[ "$ENGINE" != podman* ]]; then
+  if ! ensure_docker_daemon; then
+    echo "error: docker daemon not reachable (start Colima or Docker Desktop)" >&2
+    echo "  tip: colima start   OR   open -a Docker" >&2
+    exit 1
+  fi
 fi
 
 # Compile linux binary inside golang image; sources are BIND-MOUNTED (not tarred
