@@ -186,6 +186,10 @@ func tideSnap(r modeResult) lucy.Snapshot {
 		}
 		snap.MobileAccPerSec = snap.AccPerSec / mb
 	}
+	snap.Windows = nil
+	snap.SoftAccBlocks = nil
+	snap.PhaseBlocks = nil
+	snap.SwitchBlocks = nil
 	return snap
 }
 
