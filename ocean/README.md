@@ -10,6 +10,7 @@ cd apps/aai/ocean
 cp .env.example .env          # edit IPs / ports
 go run .
 # → http://localhost:8090
+# → http://localhost:8090/compare   (machine × LR compare + PDF)
 ```
 
 Needs sibling `chaosglue/tide` (and welvet/webgpu via replace) next to `welvet/`.
@@ -22,19 +23,27 @@ Needs sibling `chaosglue/tide` (and welvet/webgpu via replace) next to `welvet/`
 | `OCEAN_TITLE` | UI title |
 | `TIDE_PEERS` | comma list of tide origins |
 
-Named peers (nice labels on the board):
+Compare **two machines** across **all funny-LRs** in each tide archive (test53 puts `|lr=…` on every cell ID). Name peers with a machine prefix:
 
 ```bash
-TIDE_PEERS=m4=http://192.168.0.22:8080,m5_hi=http://192.168.0.244:8082
+TIDE_PEERS=m4-lo=http://192.168.0.22:8080,m5-lo=http://192.168.0.244:8080
+TIDE_PEERS=m4-lo=http://192.168.0.22:8080,m4-hi=http://192.168.0.22:8082,m5-lo=http://192.168.0.244:8080,m5-hi=http://192.168.0.244:8082
 ```
 
 Or bare URLs (`tide-1`, `tide-2`, …):
 
 ```bash
-TIDE_PEERS=http://192.168.0.22:8080,http://192.168.0.244:8082
+TIDE_PEERS=http://192.168.0.22:8080,http://192.168.0.244:8080
 ```
 
-Each peer must be a running Tide with `/api/board` (test53 lo `:8080`, hi `:8082`, neg `:8081`, etc.).
+Each peer must be a running Tide with `/api/board` and a finished (or live) `/api/report` archive.
+
+| Page | URL |
+|------|-----|
+| Holistic board | `/` |
+| **Compare LR** | `/compare` |
+| Compare PDF | `/api/compare.pdf` |
+| Ocean PDF | `/api/report.pdf` |
 
 Registration is **off by default** (`StaticOnly`) so old Pi/quick_sprint workers cannot append themselves via `POST /api/register`. Set `OCEAN_ALLOW_REGISTER=true` only if you want that.
 
