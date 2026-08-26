@@ -75,11 +75,12 @@ compile_binary() {
     -w /src/welvet/apps/aai/test53 \
     -e CGO_ENABLED=1 \
     -e GOOS=linux \
+    -e GOFLAGS=-mod=readonly \
     golang:1.22-bookworm \
     bash -ec '
       apt-get update -qq
       apt-get install -y -qq gcc libc6-dev >/dev/null
-      go mod tidy
+      # Do NOT go mod tidy — welvet is mounted :ro. go.sum must already be committed.
       go build -trimpath -ldflags="-s -w" -o /out/test53 .
       ls -lh /out/test53
     '
