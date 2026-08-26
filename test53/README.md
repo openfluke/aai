@@ -12,11 +12,11 @@ Repeats **5 days**. Each morning places drift ±1 so the route **moves**.
 Agent picks **1 of 6 actions**: N / S / E / W / ACT / WAIT.
 
 ```
-kind → mode → dtype → lr↑
-(~20 × 29 × 34 × 8 ≈ 157k jobs)
+lr↑ → mode → dtype → kind
+(~8 × 29 × 34 × 20 ≈ 157k jobs)
 ```
 
-Funny LRs: `0, 2, 200, 2000, 20000, 1m, 10m, 100m`
+Sweep order: **all modes × dtypes × layers at LR=0**, then LR=2, … up to 100m.
 
 ## Defaults (`go run .`)
 

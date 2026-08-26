@@ -271,13 +271,12 @@ func main() {
 
 func expandJobs(kinds []CellKind, modes []parallel.TrainMode, dtypes []core.DType, lrs []float64) []Job {
 	out := make([]Job, 0, len(kinds)*len(modes)*len(dtypes)*len(lrs))
-	// Mode → dtype outer; kind next so Tide shows dense/mha/lstm/… within the first
-	// ~160 jobs of each mode×dtype (not after finishing all of dense alone).
-	// LR climbs last within each layer cell.
-	for _, m := range modes {
-		for _, dt := range dtypes {
-			for _, k := range kinds {
-				for _, lr := range lrs {
+	// LR↑ outermost: finish every mode × dtype × layer at one LR before the next.
+	// Within an LR: mode → dtype → kind (kinds interleaved so Tide shows mha/lstm early).
+	for _, lr := range lrs {
+		for _, m := range modes {
+			for _, dt := range dtypes {
+				for _, k := range kinds {
 					id := fmt.Sprintf("%s|%s|%s|lr=%s", k, dt, m.String(), formatLR(lr))
 					out = append(out, Job{ID: id, Kind: k, DType: dt, Mode: m, LR: lr})
 				}
