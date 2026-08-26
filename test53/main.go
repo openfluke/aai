@@ -252,8 +252,8 @@ func main() {
 			if r.Err != "" {
 				tag = "ERR " + trim(r.Err, 60)
 			}
-			fmt.Printf("  [%d/%d pending · %d left] Acc %.1f Score %.0f · %s · %s\n",
-				n, totalPending, planTotal-doneNow, r.Acc, r.Score, r.ID, tag)
+			fmt.Printf("  [%d/%d pending · %d left] Acc %.1f Avail %.1f Score %.0f · %s · %s\n",
+				n, totalPending, planTotal-doneNow, r.Acc, r.Avail, r.Score, r.ID, tag)
 		}
 		if n%100 == 0 || n == totalPending {
 			writeLPD(store, results)
@@ -497,6 +497,7 @@ func runJob(j Job, seed int64, hidden int, dur time.Duration) modeResult {
 	r.Lucy.Duration = time.Since(start)
 	r.Lucy.InferMs = totalInfer.Seconds() * 1000
 	r.Lucy.TrainMs = totalTrain.Seconds() * 1000
+	r.Lucy.TotalOutputs = r.Actions
 	lucy.Finalize(&r.Lucy, lucy.Options{AdaptWindows: 10, ConsThreshold: lucy.ConsThreshold})
 
 	acc, soft, days := evalRoute(st, grid, j.Mode, seed+7, 256)
