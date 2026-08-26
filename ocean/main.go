@@ -12,12 +12,18 @@ import (
 
 func main() {
 	LoadDotEnv(".env")
+	// .env peers win over a leftover TIDE_PEERS in the shell (old quick_sprint farms).
+	if v := dotenvKey(".env", "TIDE_PEERS"); v != "" {
+		_ = os.Setenv("TIDE_PEERS", v)
+	}
 
 	addr := flag.String("addr", EnvOr("OCEAN_ADDR", "0.0.0.0:8090"), "ocean listen addr")
 	title := flag.String("title", EnvOr("OCEAN_TITLE", "aai ocean"), "dashboard title")
 	peersFlag := flag.String("peers", EnvOr("TIDE_PEERS", ""),
 		"comma tides: url or name=url (e.g. m4=http://192.168.0.22:8080,m5=http://192.168.0.244:8082)")
 	outDir := flag.String("out", EnvOr("OCEAN_OUT", "results"), "optional PDF/chart write dir")
+	allowReg := flag.Bool("allow-register", EnvBool("OCEAN_ALLOW_REGISTER", false),
+		"allow POST /api/register to add peers (default off — .env list only)")
 	flag.Parse()
 
 	peers := parsePeers(*peersFlag)
@@ -34,6 +40,7 @@ func main() {
 	fmt.Println(" aai ocean — watch remote tides (no training here)")
 	fmt.Printf(" listen: %s  →  http://localhost%s\n", *addr, portOf(*addr))
 	fmt.Printf(" title:  %s\n", *title)
+	fmt.Printf(" register: %v (static-only=%v)\n", *allowReg, !*allowReg)
 	fmt.Println(" peers:")
 	for _, p := range peers {
 		fmt.Printf("   %-16s %s\n", p.Name, p.URL)
@@ -41,10 +48,11 @@ func main() {
 	fmt.Println("════════════════════════════════════════════════════════")
 
 	srv := &ocean.Server{
-		Addr:   *addr,
-		Title:  *title,
-		Peers:  peers,
-		OutDir: *outDir,
+		Addr:       *addr,
+		Title:      *title,
+		Peers:      peers,
+		OutDir:     *outDir,
+		StaticOnly: !*allowReg,
 	}
 	log.Fatal(srv.ListenAndServe())
 }

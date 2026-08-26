@@ -36,6 +36,10 @@ TIDE_PEERS=http://192.168.0.22:8080,http://192.168.0.244:8082
 
 Each peer must be a running Tide with `/api/board` (test53 lo `:8080`, hi `:8082`, neg `:8081`, etc.).
 
+Registration is **off by default** (`StaticOnly`) so old Pi/quick_sprint workers cannot append themselves via `POST /api/register`. Set `OCEAN_ALLOW_REGISTER=true` only if you want that.
+
+`.env` `TIDE_PEERS` wins over a leftover shell `TIDE_PEERS`.
+
 ## Flags
 
-Same knobs override env: `-addr`, `-title`, `-peers`, `-out`.
+Same knobs override env: `-addr`, `-title`, `-peers`, `-out`, `-allow-register`.

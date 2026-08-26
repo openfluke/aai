@@ -3,3 +3,4 @@ results/
 ocean
 *.log
 .gocache
+.gotmp
