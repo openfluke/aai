@@ -199,6 +199,12 @@ case "$cmd" in
     dc restart
     ;;
   *)
+    if [[ "$cmd" != up && "$cmd" != --* && "$cmd" != build ]]; then
+      echo "error: unknown command '$cmd'" >&2
+      echo "  layer names go on run-docker-lo/hi/neg.sh, not run-docker.sh:" >&2
+      echo "    ./run-docker-hi.sh dense --build" >&2
+      echo "  (git pull if you still see ckpt=test53_ckpt_hi without /dense/)" >&2
+    fi
     echo "Usage: $0 [up|--build|--logs|--stop|--status|--restart]" >&2
     exit 2
     ;;
