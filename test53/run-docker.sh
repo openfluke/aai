@@ -81,7 +81,7 @@ compile_binary() {
       apt-get update -qq
       apt-get install -y -qq gcc libc6-dev >/dev/null
       # Do NOT go mod tidy — welvet is mounted :ro. go.sum must already be committed.
-      go build -trimpath -ldflags="-s -w" -o /out/test53 .
+      go build -buildvcs=false -trimpath -ldflags="-s -w" -o /out/test53 .
       ls -lh /out/test53
     '
 
