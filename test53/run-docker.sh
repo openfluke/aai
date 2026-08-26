@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# test53 — compile Go binary, then put ONLY the binary in Docker (tiny context).
+# test53 — Podman-first (Mac + Linux). Compiles Go binary, then compose up.
 #
 #   ./run-docker.sh              # start existing image
-#   ./run-docker.sh --build      # go build (in golang container) → compose up
+#   ./run-docker.sh --build      # go build (podman) → compose up
 #   ./run-docker.sh --logs|--stop|--status|--restart
 set -euo pipefail
 
@@ -20,74 +20,107 @@ if [[ ! -d "$ROOT/tide" || ! -d "$ROOT/webgpu" ]]; then
   exit 1
 fi
 
-# Prefer Colima's official env (fixes "already running" but docker info fails).
-if command -v colima >/dev/null 2>&1; then
-  if colima status 2>/dev/null | grep -qi 'Running'; then
-    # shellcheck disable=SC1090
-    eval "$(colima docker-env 2>/dev/null)" || true
+is_mac() { [[ "$(uname -s)" == Darwin ]]; }
+
+ensure_podman() {
+  if command -v podman >/dev/null 2>&1; then
+    return 0
   fi
-fi
-
-# --- compose + docker run ---
-if command -v docker-compose >/dev/null 2>&1; then
-  dc() { docker-compose --project-name "$PROJECT" "$@"; }
-  ENGINE=compose-bin
-elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  dc() { docker compose --project-name "$PROJECT" "$@"; }
-  ENGINE=docker
-elif command -v sg >/dev/null 2>&1 && sg docker -c 'docker compose version' >/dev/null 2>&1; then
-  dc() { sg docker -c "docker compose --project-name $PROJECT $*"; }
-  ENGINE=docker-sg
-elif podman compose version >/dev/null 2>&1; then
-  systemctl --user start podman.socket 2>/dev/null || true
-  export DOCKER_HOST="${DOCKER_HOST:-unix:///run/user/$(id -u)/podman/podman.sock}"
-  dc() { podman compose --project-name "$PROJECT" "$@"; }
-  ENGINE=podman
-else
-  echo "error: need docker-compose or docker compose" >&2
-  exit 1
-fi
-
-drun() {
-  if [[ "$ENGINE" == docker-sg ]]; then
-    sg docker -c "docker run $*"
-  elif [[ "$ENGINE" == podman* ]]; then
-    podman run "$@"
-  else
-    docker run "$@"
-  fi
-}
-
-if [[ "$ENGINE" != podman* ]]; then
-  if ! docker info >/dev/null 2>&1; then
-    echo "error: docker not reachable for compose" >&2
-    echo "  try:  eval \"\$(colima docker-env)\" && docker info" >&2
-    echo "  or:   colima restart" >&2
-    docker info 2>&1 | head -5 >&2 || true
+  if ! is_mac; then
+    echo "error: podman not installed" >&2
+    echo "  Fedora: sudo dnf install -y podman podman-compose" >&2
     exit 1
   fi
+  if ! command -v brew >/dev/null 2>&1; then
+    echo "error: podman missing and Homebrew not found — install brew, then: brew install podman" >&2
+    exit 1
+  fi
+  echo "podman not found — installing via Homebrew…"
+  brew install podman
+}
+
+ensure_podman_machine() {
+  is_mac || return 0
+  # Init default machine if none exists.
+  if ! podman machine list --format '{{.Name}}' 2>/dev/null | grep -q .; then
+    echo "podman machine init (first time)…"
+    podman machine init --cpus 4 --memory 8192 --disk-size 60
+  fi
+  # Start if not running.
+  if ! podman machine list --format '{{.Name}} {{.Running}}' 2>/dev/null | grep -qi 'true\|running'; then
+    # Newer podman uses Running column true/false; older prints differently.
+    if ! podman info >/dev/null 2>&1; then
+      echo "podman machine start…"
+      podman machine start
+    fi
+  fi
+  if ! podman info >/dev/null 2>&1; then
+    echo "podman machine start…"
+    podman machine start
+  fi
+  podman info >/dev/null
+}
+
+ensure_podman_compose() {
+  if podman compose version >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v podman-compose >/dev/null 2>&1; then
+    return 0
+  fi
+  if is_mac && command -v brew >/dev/null 2>&1; then
+    echo "installing docker-compose plugin / podman-compose…"
+    brew install docker-compose 2>/dev/null || brew install podman-compose || true
+  fi
+  if podman compose version >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v podman-compose >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "error: need 'podman compose' or 'podman-compose'" >&2
+  exit 1
+}
+
+ensure_podman
+# Don't inherit a broken Colima DOCKER_HOST — podman has its own machine.
+unset DOCKER_HOST || true
+ensure_podman_machine
+ensure_podman_compose
+
+if podman compose version >/dev/null 2>&1; then
+  dc() { podman compose --project-name "$PROJECT" "$@"; }
+  ENGINE=podman-compose
+else
+  dc() { podman-compose --project-name "$PROJECT" "$@"; }
+  ENGINE=podman-compose-bin
 fi
+drun() { podman run "$@"; }
 
 compile_binary() {
-  echo "compiling linux binary via golang container (bind mounts)…"
+  echo "compiling linux binary via podman golang container…"
   mkdir -p "$BIN_DIR"
   cp -f "$DIR/Dockerfile" "$BIN_DIR/Dockerfile"
   cp -f "$DIR/.env.example" "$BIN_DIR/.env.example"
 
   local platform=""
-  platform="$(docker version -f '{{.Server.Os}}/{{.Server.Arch}}' 2>/dev/null || true)"
+  platform="$(podman info -f '{{.Host.OS}}/{{.Host.Arch}}' 2>/dev/null || true)"
+  # Normalize arch names podman may report.
+  platform="${platform/arm64/arm64}"
+  platform="${platform/aarch64/arm64}"
+  platform="${platform/x86_64/amd64}"
 
   run_compile() {
     drun --rm "$@" \
       -v "$WELVET:/src/welvet:ro" \
       -v "$ROOT/tide:/src/tide:ro" \
       -v "$ROOT/webgpu:/src/webgpu:ro" \
-      -v "$BIN_DIR:/out" \
+      -v "$BIN_DIR:/out:Z" \
       -w /src/welvet/apps/aai/test53 \
       -e CGO_ENABLED=1 \
       -e GOOS=linux \
       -e GOFLAGS=-mod=readonly \
-      golang:1.22-bookworm \
+      docker.io/library/golang:1.22-bookworm \
       bash -ec '
         apt-get update -qq
         apt-get install -y -qq gcc libc6-dev >/dev/null
