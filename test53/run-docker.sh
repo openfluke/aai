@@ -22,21 +22,59 @@ fi
 
 docker_ok() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
 
+# Colima often runs while DOCKER_HOST still points nowhere — wire the socket.
+wire_colima_docker() {
+  command -v colima >/dev/null 2>&1 || return 1
+  # Prefer colima's own hint when available.
+  local sock=""
+  sock="$(colima ssh -- printenv DOCKER_HOST 2>/dev/null | tr -d '\r' || true)"
+  if [[ -z "$sock" || "$sock" != unix://* ]]; then
+    # Common Colima paths (default profile + named profiles).
+    local cand
+    for cand in \
+      "$HOME/.colima/default/docker.sock" \
+      "$HOME/.colima/docker.sock" \
+      "$HOME/.colima/"*/docker.sock
+    do
+      if [[ -S "$cand" ]]; then
+        sock="unix://$cand"
+        break
+      fi
+    done
+  fi
+  if [[ -n "$sock" ]]; then
+    export DOCKER_HOST="$sock"
+    echo "DOCKER_HOST=$DOCKER_HOST"
+    return 0
+  fi
+  return 1
+}
+
 # Colima / Desktop sometimes needs a kick after stop.
 ensure_docker_daemon() {
   if docker_ok; then
     return 0
   fi
+  # Colima already running but CLI can't see it → set DOCKER_HOST.
   if command -v colima >/dev/null 2>&1; then
-    echo "docker daemon not up — trying: colima start"
-    colima start || true
+    if colima status 2>/dev/null | grep -qi 'Running'; then
+      echo "colima is running — wiring DOCKER_HOST"
+      wire_colima_docker || true
+      if docker_ok; then
+        return 0
+      fi
+    else
+      echo "docker daemon not up — trying: colima start"
+      colima start || true
+      wire_colima_docker || true
+    fi
   fi
   if command -v docker >/dev/null 2>&1; then
-    # last resort: docker desktop CLI
     open -a Docker 2>/dev/null || true
   fi
   local i
   for i in 1 2 3 4 5 6 7 8 9 10; do
+    wire_colima_docker 2>/dev/null || true
     if docker_ok; then
       echo "docker daemon ready"
       return 0
@@ -75,6 +113,9 @@ pick_engine() {
   fi
   return 1
 }
+
+# Wire Colima before probing compose — otherwise `docker info` looks "dead".
+wire_colima_docker 2>/dev/null || true
 
 if ! pick_engine; then
   echo "error: need docker compose OR docker-compose OR podman compose" >&2
