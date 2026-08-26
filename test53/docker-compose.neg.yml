@@ -1,0 +1,8 @@
+# Override for negative-LR farm (./run-docker-neg.sh).
+# Port comes from TIDE_PORT (default 8081 via the wrapper).
+services:
+  test53:
+    container_name: test53-neg
+    image: test53:local
+    environment:
+      TEST53_LRS: "${TEST53_LRS:-funny-neg}"

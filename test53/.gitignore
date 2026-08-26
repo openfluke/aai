@@ -1,4 +1,5 @@
 test53_ckpt/
+test53_ckpt_neg/
 .build-ctx/
 .bin/
 *.log

@@ -8,9 +8,11 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
-PROJECT=test53
+PROJECT="${TEST53_PROJECT:-test53}"
 BIN_DIR="$DIR/.bin"
 export TEST53_CKPT_HOST="${TEST53_CKPT_HOST:-$DIR/test53_ckpt}"
+export TEST53_LRS="${TEST53_LRS:-funny}"
+export TIDE_PORT="${TIDE_PORT:-8080}"
 mkdir -p "$TEST53_CKPT_HOST" "$BIN_DIR"
 
 WELVET="$(cd "$DIR/../../.." && pwd)"
@@ -88,11 +90,16 @@ unset DOCKER_HOST || true
 ensure_podman_machine
 ensure_podman_compose
 
+compose_args=(-f "$DIR/docker-compose.yml")
+if [[ -n "${TEST53_COMPOSE_OVERRIDE:-}" ]]; then
+  compose_args+=(-f "$DIR/$TEST53_COMPOSE_OVERRIDE")
+fi
+
 if podman compose version >/dev/null 2>&1; then
-  dc() { podman compose --project-name "$PROJECT" "$@"; }
+  dc() { podman compose --project-name "$PROJECT" "${compose_args[@]}" "$@"; }
   ENGINE=podman-compose
 else
-  dc() { podman-compose --project-name "$PROJECT" "$@"; }
+  dc() { podman-compose --project-name "$PROJECT" "${compose_args[@]}" "$@"; }
   ENGINE=podman-compose-bin
 fi
 drun() { podman run "$@"; }
@@ -149,15 +156,15 @@ case "$cmd" in
       echo "wrote .env"
     fi
     if command -v lsof >/dev/null 2>&1; then
-      pids=$(lsof -tiTCP:8080 -sTCP:LISTEN 2>/dev/null || true)
+      pids=$(lsof -tiTCP:"${TIDE_PORT}" -sTCP:LISTEN 2>/dev/null || true)
       if [[ -n "${pids:-}" ]]; then
-        echo "killing host listeners on :8080 → $pids"
+        echo "killing host listeners on :${TIDE_PORT} → $pids"
         # shellcheck disable=SC2086
         kill $pids 2>/dev/null || true
         sleep 1
       fi
     fi
-    echo "engine=$ENGINE"
+    echo "engine=$ENGINE  project=$PROJECT  lrs=$TEST53_LRS"
     if [[ "$cmd" == "--build" || "$cmd" == "build" ]]; then
       compile_binary
       dc up --build -d
