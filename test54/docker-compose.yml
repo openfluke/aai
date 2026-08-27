@@ -1,0 +1,36 @@
+# test54 — deep dayroute. ./run-docker.sh --build compiles the Go binary
+# first, then this compose copies just that binary (tiny context, no source tree).
+
+services:
+  test54:
+    build:
+      context: .bin
+      dockerfile: Dockerfile
+    image: test54:local
+    container_name: ${TEST54_CONTAINER_NAME:-test54}
+    env_file:
+      - .env
+    environment:
+      TEST54_LAYERS: "${TEST54_LAYERS:-mamba}"
+      TEST54_MODES: "${TEST54_MODES:-all}"
+      TEST54_DTYPES: "${TEST54_DTYPES:-all}"
+      TEST54_LRS: "${TEST54_LRS:-0.05}"
+      TEST54_CAMS: "${TEST54_CAMS:-1}"
+      TEST54_WORKERS: "${TEST54_WORKERS:-4}"
+      TEST54_DURATION: "${TEST54_DURATION:-15s}"
+      TEST54_LR: "${TEST54_LR:-0.05}"
+      TEST54_HIDDEN: "${TEST54_HIDDEN:-32}"
+      TEST54_DEPTH: "${TEST54_DEPTH:-4}"
+      TEST54_CKPT: "/app/test54_ckpt"
+      TEST54_CKPT_FLAT: "true"
+      TEST54_RESUME: "true"
+      TEST54_TIDE_ADDR: "0.0.0.0:8080"
+      GOMEMLIMIT: "${GOMEMLIMIT:-6GiB}"
+      GOGC: "${GOGC:-50}"
+    ports:
+      - "${TIDE_PORT:-9080}:8080"
+    volumes:
+      - ${TEST54_CKPT_HOST:-./test54_ckpt}:/app/test54_ckpt:z
+    restart: always
+    working_dir: /app
+    mem_limit: ${TEST54_MEM_LIMIT:-7g}

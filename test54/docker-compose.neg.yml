@@ -1,0 +1,9 @@
+# Override for negative-LR farm (./run-docker-neg.sh).
+# Port comes from TIDE_PORT (default 8081 via the wrapper).
+services:
+  test54:
+    container_name: "${TEST54_CONTAINER_NAME:-test54-neg}"
+    image: test54:local
+    environment:
+      TEST54_LRS: "${TEST54_LRS:-0.05}"
+      TEST54_CAMS: "${TEST54_CAMS:-1}"
