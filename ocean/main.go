@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/openfluke/tide/ocean"
 )
@@ -16,25 +17,53 @@ func main() {
 	if v := dotenvKey(".env", "TIDE_PEERS"); v != "" {
 		_ = os.Setenv("TIDE_PEERS", v)
 	}
+	if v := dotenvKey(".env", "OCEAN_CACHE"); v != "" {
+		_ = os.Setenv("OCEAN_CACHE", v)
+	}
 
 	addr := flag.String("addr", EnvOr("OCEAN_ADDR", "0.0.0.0:8090"), "ocean listen addr")
 	title := flag.String("title", EnvOr("OCEAN_TITLE", "aai ocean"), "dashboard title")
 	peersFlag := flag.String("peers", EnvOr("TIDE_PEERS", ""),
-		"comma tides: url or name=url (e.g. m4=http://192.168.0.22:8080,m5=http://192.168.0.244:8082)")
+		"comma tides: url or name=url (live mode)")
 	outDir := flag.String("out", EnvOr("OCEAN_OUT", "results"), "optional PDF/chart write dir")
 	allowReg := flag.Bool("allow-register", EnvBool("OCEAN_ALLOW_REGISTER", false),
 		"allow POST /api/register to add peers (default off — .env list only)")
+	cacheRoot := flag.String("cache", EnvOr("OCEAN_CACHE", EnvOr("CACHE_ROOT", "")),
+		"scan this dir recursively for test53 results.json (Acc-first board)")
 	flag.Parse()
+
+	if err := os.MkdirAll(*outDir, 0o755); err != nil {
+		log.Fatal(err)
+	}
+
+	// Cache Acc mode: scan disk, no live tides required.
+	if strings.TrimSpace(*cacheRoot) != "" {
+		idx := newCacheIndex(*cacheRoot)
+		fmt.Println("════════════════════════════════════════════════════════")
+		fmt.Println(" aai ocean — CACHE Acc rank (test53 results.json)")
+		fmt.Printf(" cache:  %s\n", *cacheRoot)
+		fmt.Printf(" listen: %s  →  http://localhost%s\n", *addr, portOf(*addr))
+		fmt.Printf(" title:  %s\n", *title)
+		fmt.Println(" pages:  /  (Acc)   /compare   /api/acc   /api/compare.pdf")
+		fmt.Println("════════════════════════════════════════════════════════")
+		t0 := time.Now()
+		if err := idx.reload(); err != nil {
+			log.Fatalf("cache scan: %v", err)
+		}
+		farms, cells, root, _ := idx.Stats()
+		fmt.Printf(" loaded %d farms · %d cells from %s in %s\n", farms, cells, root, time.Since(t0).Round(time.Millisecond))
+		if farms == 0 {
+			log.Fatalf("no results.json under %s", root)
+		}
+		srv := &accServer{addr: *addr, title: *title, outDir: *outDir, cache: idx}
+		log.Fatal(srv.ListenAndServe())
+	}
 
 	peers := resolvePeers(*peersFlag)
 	if len(peers) == 0 {
-		fmt.Fprintln(os.Stderr, "error: set TIDE_PEERS and/or TIDE_PEER_HOST + TIDE_CAMS in .env")
-		fmt.Fprintln(os.Stderr, "  example: TIDE_PEER_HOST=192.168.0.22  TIDE_CAMS=1,3  TIDE_BANDS=lo,hi")
-		fmt.Fprintln(os.Stderr, "  or:      TIDE_PEERS=cam1-lo=http://192.168.0.22:8080,cam3-lo=http://192.168.0.22:8100")
+		fmt.Fprintln(os.Stderr, "error: set OCEAN_CACHE=/path/to/test53  (Acc cache mode)")
+		fmt.Fprintln(os.Stderr, "  or set TIDE_PEERS / TIDE_PEER_HOST + TIDE_CAMS (live tide mode)")
 		os.Exit(2)
-	}
-	if err := os.MkdirAll(*outDir, 0o755); err != nil {
-		log.Fatal(err)
 	}
 
 	fmt.Println("════════════════════════════════════════════════════════")

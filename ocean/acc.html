@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>ocean · Acc cache</title>
+<style>
+:root{
+  --bg:#0c1017; --panel:#141a24; --fg:#e9eef7; --muted:#8b95a8;
+  --line:#243044; --accent:#6ec8ff; --good:#5ddea6; --warn:#f0b45a; --bad:#f07178;
+  --grid:rgba(255,255,255,.06);
+}
+*{box-sizing:border-box}
+body{margin:0;font:13px/1.4 ui-sans-serif,system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+header{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:baseline;padding:14px 18px;border-bottom:1px solid var(--line);background:#0a0e14}
+header h1{margin:0;font-size:16px;font-weight:650;letter-spacing:.02em}
+header .meta{color:var(--muted);font-size:12px}
+header .nav{margin-left:auto;display:flex;gap:14px;align-items:center}
+button{background:#1b2433;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+main{padding:16px 18px 48px;display:grid;gap:16px}
+.row{display:grid;gap:16px;grid-template-columns:1fr}
+@media(min-width:1100px){.row.two{grid-template-columns:1.2fr .8fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;overflow:auto}
+.card h2{margin:0 0 8px;font-size:13px;font-weight:650;color:#c9d4e6}
+.card p.sub{margin:0 0 10px;color:var(--muted);font-size:12px}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{padding:5px 7px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{color:var(--muted);font-weight:600;font-size:11px;position:sticky;top:0;background:var(--panel)}
+td.num,th.num{text-align:right}
+tr:hover td{background:rgba(110,200,255,.06)}
+.pill{display:inline-block;padding:1px 7px;border-radius:999px;background:#1b2433;border:1px solid var(--line);font-size:11px;color:var(--muted)}
+.charts{display:grid;gap:16px}
+@media(min-width:900px){.charts{grid-template-columns:1fr 1fr}}
+.chart-wrap{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.chart-wrap h3{margin:0 0 6px;font-size:12px;color:#c9d4e6}
+canvas{width:100%;height:280px;display:block;background:#0b0f16;border-radius:6px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 10px;margin-top:8px;font-size:11px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.filters select,.filters input{background:#0b0f16;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">ocean · Acc cache</h1>
+  <div class="meta" id="meta">loading…</div>
+  <div class="nav">
+    <a href="/compare">compare</a>
+    <a href="/api/compare.pdf">PDF</a>
+    <button type="button" id="reload">reload cache</button>
+  </div>
+</header>
+<main>
+  <section class="card">
+    <h2>Pure Acc rank</h2>
+    <p class="sub">Top-level <code>results.acc</code> only (closed-loop eval). Tie-break Avail then Score. Not LPD / RelAcc.</p>
+    <div class="filters">
+      <label>farm <select id="fFarm"><option value="">all</option></select></label>
+      <label>layer <select id="fLayer"><option value="">all</option></select></label>
+      <label>mode <select id="fMode"><option value="">all</option></select></label>
+      <label>min avail <input id="fAvail" type="number" min="0" max="100" step="1" value="0" style="width:4.5rem"/></label>
+    </div>
+    <div style="max-height:420px;overflow:auto">
+      <table>
+        <thead><tr>
+          <th>#</th><th class="num">Acc</th><th class="num">Avail</th><th class="num">Fit</th><th class="num">Soft</th><th class="num">Score</th>
+          <th>mode</th><th>dtype</th><th>layer</th><th>lr</th><th>farm</th><th>id</th>
+        </tr></thead>
+        <tbody id="topAcc"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="row two">
+    <div class="card">
+      <h2>Serve + train (Fit = Acc × Avail / 100)</h2>
+      <p class="sub">Highest Acc that still keeps Availability — proxy for learning without blocking serve.</p>
+      <div style="max-height:360px;overflow:auto">
+        <table>
+          <thead><tr>
+            <th>#</th><th class="num">Fit</th><th class="num">Acc</th><th class="num">Avail</th>
+            <th>mode</th><th>dtype</th><th>layer</th><th>lr</th><th>farm</th>
+          </tr></thead>
+          <tbody id="topFit"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Best Acc by mode / layer</h2>
+      <p class="sub">Peak Acc (and mean) across every cached farm.</p>
+      <div style="display:grid;gap:12px;grid-template-columns:1fr">
+        <div style="max-height:200px;overflow:auto"><table><thead><tr><th>mode</th><th class="num">best</th><th class="num">mean</th><th class="num">n</th></tr></thead><tbody id="byMode"></tbody></table></div>
+        <div style="max-height:200px;overflow:auto"><table><thead><tr><th>layer</th><th class="num">best</th><th class="num">mean</th><th class="num">n</th></tr></thead><tbody id="byLayer"></tbody></table></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Numerical types — layers combined</h2>
+    <p class="sub">Every dtype ranked by peak Acc across <strong>all layers</strong>. Shows which layer hit that peak.</p>
+    <div style="max-height:380px;overflow:auto">
+      <table>
+        <thead><tr>
+          <th>#</th><th>dtype</th><th class="num">best Acc</th><th class="num">mean Acc</th>
+          <th>best on layer</th><th>mode</th><th class="num">n</th><th>farm</th>
+        </tr></thead>
+        <tbody id="dtypeCombined"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Numerical types — split by layer</h2>
+    <p class="sub">Inside each layer, which dtype wins Acc. Pick a layer or scroll all.</p>
+    <div class="filters">
+      <label>layer <select id="fDtypeLayer"><option value="">all layers</option></select></label>
+    </div>
+    <div id="dtypeByLayer" style="display:grid;gap:12px"></div>
+  </section>
+
+  <section class="card">
+    <h2>Layers — split by numerical type</h2>
+    <p class="sub">Inside each dtype, which layer wins Acc.</p>
+    <div class="filters">
+      <label>dtype <select id="fLayerDtype"><option value="">all dtypes</option></select></label>
+    </div>
+    <div id="layerByDtype" style="display:grid;gap:12px"></div>
+  </section>
+
+  <section class="charts">
+    <div class="chart-wrap">
+      <h3>Acc vs Avail (all farms overlapping)</h3>
+      <canvas id="scatter" width="800" height="280"></canvas>
+      <div class="legend" id="scatterLeg"></div>
+    </div>
+    <div class="chart-wrap">
+      <h3>Best Acc vs LR — farms overlapping</h3>
+      <canvas id="farmSeries" width="800" height="280"></canvas>
+      <div class="legend" id="farmLeg"></div>
+    </div>
+    <div class="chart-wrap">
+      <h3>Best Acc vs LR — modes overlapping</h3>
+      <canvas id="modeSeries" width="800" height="280"></canvas>
+      <div class="legend" id="modeLeg"></div>
+    </div>
+    <div class="chart-wrap">
+      <h3>Best Acc vs LR — layers overlapping</h3>
+      <canvas id="layerSeries" width="800" height="280"></canvas>
+      <div class="legend" id="layerLeg"></div>
+    </div>
+  </section>
+</main>
+<script>
+const PAL = ['#6ec8ff','#5ddea6','#f0b45a','#f07178','#c3a6ff','#7ad1c1','#ff9ecd','#b8c0cc','#ffe08a','#8ad0ff','#a8e6a1','#ffb38a'];
+let DATA = null;
+let ALL_TOP = [];
+
+function fmt(n,d=1){return (n==null||isNaN(n))?'—':Number(n).toFixed(d)}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]))}
+
+function fillSelect(sel, values){
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">all</option>' + values.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  if ([...sel.options].some(o=>o.value===cur)) sel.value = cur;
+}
+
+function renderTables(){
+  const farm = document.getElementById('fFarm').value;
+  const layer = document.getElementById('fLayer').value;
+  const mode = document.getElementById('fMode').value;
+  const minAvail = Number(document.getElementById('fAvail').value||0);
+  const rows = ALL_TOP.filter(r =>
+    (!farm || r.farm===farm) &&
+    (!layer || r.layer===layer) &&
+    (!mode || r.mode===mode) &&
+    (r.avail||0) >= minAvail
+  );
+  document.getElementById('topAcc').innerHTML = rows.slice(0,100).map((r,i)=>`<tr>
+    <td>${i+1}</td>
+    <td class="num"><strong>${fmt(r.acc,1)}</strong></td>
+    <td class="num">${fmt(r.avail,1)}</td>
+    <td class="num">${fmt(r.fit,1)}</td>
+    <td class="num">${fmt(r.soft,1)}</td>
+    <td class="num">${fmt(r.score,0)}</td>
+    <td>${esc(r.mode)}</td><td>${esc(r.dtype)}</td><td>${esc(r.layer)}</td>
+    <td>${esc(r.lr_label||r.lr)}</td><td><span class="pill">${esc(r.farm)}</span></td>
+    <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis">${esc(r.id)}</td>
+  </tr>`).join('');
+}
+
+function renderAgg(id, rows){
+  document.getElementById(id).innerHTML = (rows||[]).slice(0,40).map(r=>`<tr>
+    <td>${esc(r.key)}</td>
+    <td class="num"><strong>${fmt(r.best_acc,1)}</strong></td>
+    <td class="num">${fmt(r.mean_acc,1)}</td>
+    <td class="num">${r.n}</td>
+  </tr>`).join('');
+}
+
+function renderDtypeCombined(){
+  document.getElementById('dtypeCombined').innerHTML = (DATA.by_dtype||[]).map((r,i)=>`<tr>
+    <td>${i+1}</td>
+    <td><strong>${esc(r.key)}</strong></td>
+    <td class="num"><strong>${fmt(r.best_acc,1)}</strong></td>
+    <td class="num">${fmt(r.mean_acc,1)}</td>
+    <td>${esc(r.best_layer||'—')}</td>
+    <td>${esc(r.best_mode||'—')}</td>
+    <td class="num">${r.n}</td>
+    <td><span class="pill">${esc(r.best_farm||'')}</span></td>
+  </tr>`).join('');
+}
+
+function renderNestedBlocks(containerId, blocks, filterVal, outerLabel, innerLabel){
+  const el = document.getElementById(containerId);
+  let list = blocks||[];
+  if(filterVal) list = list.filter(b=>b.key===filterVal);
+  if(!list.length){ el.innerHTML = '<p class="sub">no rows</p>'; return; }
+  el.innerHTML = list.map(b=>{
+    const rows = (b.rows||[]).slice(0,34).map((r,i)=>`<tr>
+      <td>${i+1}</td>
+      <td>${esc(r.key)}</td>
+      <td class="num"><strong>${fmt(r.best_acc,1)}</strong></td>
+      <td class="num">${fmt(r.mean_acc,1)}</td>
+      <td class="num">${r.n}</td>
+      <td>${esc(r.best_mode||'—')}</td>
+      <td><span class="pill">${esc(r.best_farm||'')}</span></td>
+    </tr>`).join('');
+    return `<div style="border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#0b0f16">
+      <div style="display:flex;gap:10px;align-items:baseline;margin-bottom:6px">
+        <strong>${esc(outerLabel)}: ${esc(b.key)}</strong>
+        <span class="pill">best Acc ${fmt(b.best_acc,1)}</span>
+        <span class="pill">n=${b.n}</span>
+      </div>
+      <div style="max-height:220px;overflow:auto">
+        <table>
+          <thead><tr>
+            <th>#</th><th>${esc(innerLabel)}</th><th class="num">best Acc</th><th class="num">mean</th>
+            <th class="num">n</th><th>mode</th><th>farm</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderDtypeByLayer(){
+  const v = document.getElementById('fDtypeLayer').value;
+  renderNestedBlocks('dtypeByLayer', DATA.dtype_by_layer, v, 'layer', 'dtype');
+}
+function renderLayerByDtype(){
+  const v = document.getElementById('fLayerDtype').value;
+  renderNestedBlocks('layerByDtype', DATA.layer_by_dtype, v, 'dtype', 'layer');
+}
+
+function fillSelectLabeled(sel, values, allLabel){
+  const cur = sel.value;
+  sel.innerHTML = `<option value="">${esc(allLabel)}</option>` + values.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  if ([...sel.options].some(o=>o.value===cur)) sel.value = cur;
+}
+
+function renderFit(){
+  document.getElementById('topFit').innerHTML = (DATA.top_fit||[]).slice(0,60).map((r,i)=>`<tr>
+    <td>${i+1}</td>
+    <td class="num"><strong>${fmt(r.fit,1)}</strong></td>
+    <td class="num">${fmt(r.acc,1)}</td>
+    <td class="num">${fmt(r.avail,1)}</td>
+    <td>${esc(r.mode)}</td><td>${esc(r.dtype)}</td><td>${esc(r.layer)}</td>
+    <td>${esc(r.lr_label||r.lr)}</td><td><span class="pill">${esc(r.farm)}</span></td>
+  </tr>`).join('');
+}
+
+function colorFor(i){return PAL[i % PAL.length]}
+
+function drawScatter(canvas, points){
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+  const pad = {l:44,r:12,t:12,b:34};
+  const farms = [...new Set(points.map(p=>p.farm))];
+  const farmColor = Object.fromEntries(farms.map((f,i)=>[f,colorFor(i)]));
+  const xs = points.map(p=>p.avail||0), ys = points.map(p=>p.acc||0);
+  const x0=0,x1=100,y0=0,y1=Math.max(50, Math.ceil(Math.max(...ys,1)/5)*5);
+  const X = v => pad.l + (v-x0)/(x1-x0)*(W-pad.l-pad.r);
+  const Y = v => H-pad.b - (v-y0)/(y1-y0)*(H-pad.t-pad.b);
+  ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.lineWidth=1;
+  for(let a=0;a<=100;a+=20){ctx.beginPath();ctx.moveTo(X(a),pad.t);ctx.lineTo(X(a),H-pad.b);ctx.stroke()}
+  for(let a=0;a<=y1;a+=10){ctx.beginPath();ctx.moveTo(pad.l,Y(a));ctx.lineTo(W-pad.r,Y(a));ctx.stroke()}
+  ctx.fillStyle='#8b95a8'; ctx.font='11px system-ui';
+  ctx.fillText('Avail %', W/2-20, H-8);
+  ctx.save(); ctx.translate(12,H/2); ctx.rotate(-Math.PI/2); ctx.fillText('Acc %',0,0); ctx.restore();
+  for(const p of points){
+    ctx.fillStyle = farmColor[p.farm]||'#6ec8ff';
+    ctx.globalAlpha = 0.55;
+    ctx.beginPath(); ctx.arc(X(p.avail||0), Y(p.acc||0), 2.2, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  document.getElementById('scatterLeg').innerHTML = farms.slice(0,16).map((f,i)=>`<span><i style="background:${colorFor(i)}"></i>${esc(f)}</span>`).join('');
+}
+
+function drawSeries(canvas, series, legId){
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+  const pad = {l:44,r:12,t:12,b:40};
+  if(!series || !series.length){ctx.fillStyle='#8b95a8';ctx.fillText('no data',20,20);return}
+  const allLR = [...new Set(series.flatMap(s=>s.points.map(p=>p.lr)))].sort((a,b)=>a-b);
+  const labels = {};
+  for(const s of series) for(const p of s.points) labels[p.lr]=p.lr_label||String(p.lr);
+  const yMax = Math.max(50, Math.ceil(Math.max(...series.flatMap(s=>s.points.map(p=>p.best_acc)),1)/5)*5);
+  const X = i => pad.l + (allLR.length<=1?0:i/(allLR.length-1))*(W-pad.l-pad.r);
+  const Y = v => H-pad.b - (v/yMax)*(H-pad.t-pad.b);
+  const lrIndex = Object.fromEntries(allLR.map((lr,i)=>[lr,i]));
+  ctx.strokeStyle='rgba(255,255,255,.08)';
+  for(let a=0;a<=yMax;a+=10){ctx.beginPath();ctx.moveTo(pad.l,Y(a));ctx.lineTo(W-pad.r,Y(a));ctx.stroke()}
+  ctx.fillStyle='#8b95a8'; ctx.font='10px system-ui';
+  allLR.forEach((lr,i)=>{
+    const x=X(i); ctx.save(); ctx.translate(x, H-pad.b+8); ctx.rotate(-0.55);
+    ctx.fillText(labels[lr]||String(lr),0,0); ctx.restore();
+  });
+  series.forEach((s,si)=>{
+    const col = colorFor(si);
+    ctx.strokeStyle=col; ctx.fillStyle=col; ctx.lineWidth=1.8;
+    ctx.beginPath();
+    let started=false;
+    for(const p of s.points){
+      const i = lrIndex[p.lr]; if(i==null) continue;
+      const x=X(i), y=Y(p.best_acc);
+      if(!started){ctx.moveTo(x,y);started=true} else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+    for(const p of s.points){
+      const i = lrIndex[p.lr]; if(i==null) continue;
+      ctx.beginPath(); ctx.arc(X(i), Y(p.best_acc), 2.5, 0, Math.PI*2); ctx.fill();
+    }
+  });
+  document.getElementById(legId).innerHTML = series.map((s,i)=>`<span><i style="background:${colorFor(i)}"></i>${esc(s.name)}</span>`).join('');
+}
+
+async function load(){
+  const d = await fetch('/api/acc').then(r=>r.json());
+  DATA = d;
+  ALL_TOP = d.top_acc||[];
+  document.getElementById('title').textContent = 'ocean · Acc cache';
+  document.getElementById('meta').textContent =
+    `${d.n_farms||0} farms · ${d.n_cells||0} cells · ${d.cache_root||''} · ${d.note||''}`;
+  fillSelect(document.getElementById('fFarm'), [...new Set(ALL_TOP.map(r=>r.farm))].sort());
+  fillSelect(document.getElementById('fLayer'), [...new Set(ALL_TOP.map(r=>r.layer))].sort());
+  fillSelect(document.getElementById('fMode'), [...new Set(ALL_TOP.map(r=>r.mode))].sort());
+  fillSelectLabeled(document.getElementById('fDtypeLayer'), (d.dtype_by_layer||[]).map(b=>b.key), 'all layers');
+  fillSelectLabeled(document.getElementById('fLayerDtype'), (d.layer_by_dtype||[]).map(b=>b.key), 'all dtypes');
+  renderTables();
+  renderFit();
+  renderAgg('byMode', d.by_mode);
+  renderAgg('byLayer', d.by_layer);
+  renderDtypeCombined();
+  renderDtypeByLayer();
+  renderLayerByDtype();
+  drawScatter(document.getElementById('scatter'), d.scatter||[]);
+  drawSeries(document.getElementById('farmSeries'), d.farm_series||[], 'farmLeg');
+  drawSeries(document.getElementById('modeSeries'), d.mode_series||[], 'modeLeg');
+  drawSeries(document.getElementById('layerSeries'), d.layer_series||[], 'layerLeg');
+}
+
+['fFarm','fLayer','fMode','fAvail'].forEach(id=>{
+  document.getElementById(id).addEventListener('change', renderTables);
+  document.getElementById(id).addEventListener('input', renderTables);
+});
+document.getElementById('fDtypeLayer').addEventListener('change', renderDtypeByLayer);
+document.getElementById('fLayerDtype').addEventListener('change', renderLayerByDtype);
+document.getElementById('reload').onclick = async ()=>{
+  document.getElementById('meta').textContent = 'reloading…';
+  await fetch('/api/reload', {method:'POST'});
+  await load();
+};
+load().catch(e=>{document.getElementById('meta').textContent=String(e)});
+</script>
+</body>
+</html>
