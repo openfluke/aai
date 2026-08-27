@@ -1,12 +1,13 @@
 # Sourced by run-docker-lo.sh / hi / neg. Parses optional layer + cam args, sets ckpt dir.
+# Default: both cam1 + cam3 (one machine runs lo or hi for both cams).
 # Usage:
-#   ./run-docker-lo.sh [cam1|cam3|both] [layer] [--build|--logs|...]
-#   ./run-docker-lo.sh cam3 mamba --build
-#   ./run-docker-lo.sh both mamba --build   # start cam1 + cam3 (parallel compose projects)
+#   ./run-docker-lo.sh mamba --build              # cam1 + cam3
+#   ./run-docker-lo.sh cam3 mamba --build         # cam3 only
+#   ./run-docker-hi.sh mamba --build              # cam1-hi + cam3-hi
 #   TEST54_CAMS=3 ./run-docker-lo.sh --build
 test54_parse_layer_args() {
   TEST54_LAYER="${TEST54_LAYER:-mamba}"
-  TEST54_CAMS="${TEST54_CAMS:-1}"
+  TEST54_CAMS="${TEST54_CAMS:-both}"
   TEST54_CAMS_LIST=()
   TEST54_REMAINING_ARGS=()
   while [[ $# -gt 0 ]]; do
@@ -53,7 +54,14 @@ test54_parse_layer_args() {
   done
   TEST54_REMAINING_ARGS+=("$@")
   if [[ ${#TEST54_CAMS_LIST[@]} -eq 0 ]]; then
-    TEST54_CAMS_LIST=("$TEST54_CAMS")
+    case "$TEST54_CAMS" in
+      both|cam1+3|cams|all|cam1,3|cam1+cam3)
+        TEST54_CAMS_LIST=(1 3)
+        ;;
+      *)
+        TEST54_CAMS_LIST=("$TEST54_CAMS")
+        ;;
+    esac
   fi
   for c in "${TEST54_CAMS_LIST[@]}"; do
     if ! [[ "$c" =~ ^[0-9]+$ ]] || [[ "$c" -lt 1 ]]; then
@@ -126,7 +134,7 @@ test54_run_for_cams() {
     export TEST54_CKPT_HOST="$(test54_ckpt_host_for_layer "$root" "$TEST54_LAYER")"
     export TEST54_COMPOSE_OVERRIDE="$override"
     mkdir -p "$TEST54_CKPT_HOST"
-    echo "test54 ${band} · cam=$cam · layer=$TEST54_LAYER  depth=${TEST54_DEPTH:-4}  lrs=${TEST54_LRS:-0.05}  dur=${TEST54_DURATION:-15s}  ckpt=$TEST54_CKPT_HOST  tide=:$TIDE_PORT"
+    echo "test54 ${band} · cam=$cam · layer=$TEST54_LAYER  depth=${TEST54_DEPTH:-4}  lrs=${TEST54_LRS:-funny-lo}  dur=${TEST54_DURATION:-15s}  ckpt=$TEST54_CKPT_HOST  tide=:$TIDE_PORT"
     "$DIR/run-docker.sh" "$@"
   done
 }

@@ -1,10 +1,10 @@
-# Override for hi farm (./run-docker-hi.sh). Same LR as lo — band is port/ckpt only.
+# Override for hi farm (./run-docker-hi.sh): 500k, 5m, 50m, 100m
 services:
   test54:
     container_name: "${TEST54_CONTAINER_NAME:-test54-hi}"
     image: test54:local
     environment:
-      TEST54_LRS: "${TEST54_LRS:-0.05}"
+      TEST54_LRS: "${TEST54_LRS:-funny-hi}"
       TEST54_DURATION: "${TEST54_DURATION:-15s}"
       TEST54_DEPTH: "${TEST54_DEPTH:-4}"
       TEST54_CAMS: "${TEST54_CAMS:-1}"

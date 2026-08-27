@@ -1,17 +1,21 @@
-# First-pass cut — same as test53 (weak / non-temporal).
+# test54 mode cut — NormalBP + Sparse only
 
-Filtered out of `TEST54_MODES=all` and the default mode list
-(`main.go` → `removedTrainModes`).
+`TEST54_MODES=all` and the default list keep **4** modes:
 
 | Token | Welvet name | Short |
 |-------|-------------|-------|
-| tween | Tween | [T] |
-| tween_chain | TweenChain | [T]Chain |
-| step_tween | StepTween | Step[T] |
-| TweenAlt | TweenAlt | [T]Alt |
-| StepTweenAlt | StepTweenAlt | Step[T]Alt |
-| MeshBP | MeshBP | MeshBP |
-| MeshTweenAlt | MeshTweenAlt | Mesh[T]Alt |
-| MeshTweenChain | MeshTweenChain | Mesh[T]Chain |
+| sgd | NormalBP | sgd |
+| TweenSplitSparse | TweenSplitSparse | [T][S]Sparse |
+| StepTweenSplitSparse | StepTweenSplitSparse | Step[T][S]Sparse |
+| MeshTweenSplitSparse | MeshTweenSplitSparse | Mesh[T][S]Sparse |
 
-Leaves **21** modes (was 29).
+StepBP removed. Everything else filtered out (`keptTrainModes` in `main.go`).
+
+## LRs
+
+| Band | Values |
+|------|--------|
+| lo (`funny-lo`) | 0.5, 5, 50, 500, 5000 |
+| hi (`funny-hi`) | 500k, 5m, 50m, 100m |
+
+Jobs ≈ **lo ~680** / **hi ~544** per layer per cam (×4 modes ×34 dtypes).

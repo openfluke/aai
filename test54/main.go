@@ -25,37 +25,27 @@ const (
 	defaultJobDur  = 15 * time.Second
 )
 
-// Default mode list (Mesh* on fixed 1³). Modes in remove_train_modes.md are omitted.
+// Default / "all" modes: BP + every Sparse variant (4 total).
 var defaultModesCSV = strings.Join([]string{
-	"sgd", "step_sgd", "step_tween_chain",
-	"MeshTween", "TweenSplit", "StepTweenSplit",
-	"TweenSplitHeadProxy", "TweenSplitLinear",
-	"TweenSplitFastProxy", "TweenSplitLinearCache", "TweenSplitHeadProxyAsync",
-	"TweenSplitSparse", "MeshTweenSplit", "MeshTweenSplitFastProxy",
-	"MeshTweenSplitSparse", "StepTweenSplitHeadProxy", "StepTweenSplitLinear",
-	"StepTweenSplitFastProxy", "StepTweenSplitLinearCache",
-	"StepTweenSplitHeadProxyAsync", "StepTweenSplitSparse",
+	"sgd",
+	"TweenSplitSparse", "StepTweenSplitSparse", "MeshTweenSplitSparse",
 }, ",")
 
-// removedTrainModes — first-pass cut for temporal/3D search (see remove_train_modes.md).
-var removedTrainModes = map[parallel.TrainMode]bool{
-	parallel.ModeTween:          true, // tween / [T]
-	parallel.ModeTweenChain:     true, // tween_chain / [T]Chain
-	parallel.ModeStepTween:      true, // step_tween / Step[T]
-	parallel.ModeTweenAlt:       true, // TweenAlt / [T]Alt
-	parallel.ModeStepTweenAlt:   true, // StepTweenAlt / Step[T]Alt
-	parallel.ModeMeshBP:         true, // MeshBP
-	parallel.ModeMeshTweenAlt:   true, // MeshTweenAlt / Mesh[T]Alt
-	parallel.ModeMeshTweenChain: true, // MeshTweenChain / Mesh[T]Chain
+// keptTrainModes — test54 only runs NormalBP and Sparse families (see remove_train_modes.md).
+var keptTrainModes = map[parallel.TrainMode]bool{
+	parallel.ModeNormalBP:             true, // sgd
+	parallel.ModeTweenSplitSparse:     true, // [T][S]Sparse
+	parallel.ModeStepTweenSplitSparse: true, // Step[T][S]Sparse
+	parallel.ModeMeshTweenSplitSparse: true, // Mesh[T][S]Sparse
 }
-// Funny LR ramp: 0.02 → 2 → 200 → 2k → 20k → 1m → 10m → 100m
-var defaultFunnyLRs = []float64{0.02, 2, 200, 2000, 20000, 1e6, 1e7, 1e8}
+// Funny LR ramp (test54): lo 0.5…5k · hi 500k…100m
+var defaultFunnyLRs = []float64{0.5, 5, 50, 500, 5000, 5e5, 5e6, 5e7, 1e8}
 
-// Mild half (./run-docker-lo.sh).
-var funnyLoLRs = []float64{0.02, 2, 200, 2000}
+// Mild half (./run-docker-lo.sh): 0.5, 5, 50, 500, 5000
+var funnyLoLRs = []float64{0.5, 5, 50, 500, 5000}
 
-// Extreme half (./run-docker-hi.sh).
-var funnyHiLRs = []float64{20000, 1e6, 1e7, 1e8}
+// Extreme half (./run-docker-hi.sh): 500k, 5m, 50m, 100m
+var funnyHiLRs = []float64{5e5, 5e6, 5e7, 1e8}
 
 func funnyLRs() []float64 {
 	out := make([]float64, len(defaultFunnyLRs))
@@ -126,12 +116,12 @@ func main() {
 	modesFlag := flag.String("modes", EnvOr("TEST54_MODES", defaultModesCSV), "csv of train modes (removed modes filtered)")
 	layersFlag := flag.String("layers", EnvOr("TEST54_LAYERS", EnvOr("TEST54_LAYER", "mamba")), "one layer or all|csv cell kinds")
 	dtypesFlag := flag.String("dtypes", EnvOr("TEST54_DTYPES", "all"), "all|csv")
-	lrsFlag := flag.String("lrs", EnvOr("TEST54_LRS", "0.05"),
-		"csv of LRs (default 0.05); empty = use -lr once; funny-* still accepted")
+	lrsFlag := flag.String("lrs", EnvOr("TEST54_LRS", "funny-lo"),
+		"funny-lo|lo = 0.5…5k; funny-hi|hi = 500k…100m; funny|all = full +ramp; or csv; empty = -lr once")
 	camsFlag := flag.String("cams", EnvOr("TEST54_CAMS", "1"), "Welvet Parallel branch count (1=dense, 3=tricameral, …)")
 	workersFlag := flag.Int("workers", EnvInt("TEST54_WORKERS", 0), "0 = NumCPU")
 	dur := flag.Duration("duration", EnvDuration("TEST54_DURATION", defaultJobDur), "wall per job")
-	lrOnce := flag.Float64("lr", EnvFloat("TEST54_LR", 0.05), "single LR when -lrs is empty")
+	lrOnce := flag.Float64("lr", EnvFloat("TEST54_LR", 0.5), "single LR when -lrs is empty")
 	hidden := flag.Int("hidden", EnvInt("TEST54_HIDDEN", defaultHidden), "sandwich hidden")
 	depth := flag.Int("depth", EnvInt("TEST54_DEPTH", defaultDepth), "mid blocks between stem and head")
 	ckpt := flag.String("ckpt", EnvOr("TEST54_CKPT", "test54_ckpt"), "checkpoint dir")
@@ -451,7 +441,13 @@ func parseModeList(spec string) ([]parallel.TrainMode, error) {
 	spec = strings.TrimSpace(spec)
 	var out []parallel.TrainMode
 	if spec == "" || strings.EqualFold(spec, "all") {
-		out = append(out, parallel.AllNamedTrainModes()...)
+		for _, tok := range strings.Split(defaultModesCSV, ",") {
+			m, err := parallel.ParseTrainMode(strings.TrimSpace(tok))
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, m)
+		}
 	} else {
 		seen := map[parallel.TrainMode]bool{}
 		for _, tok := range strings.FieldsFunc(spec, func(r rune) bool {
@@ -482,7 +478,7 @@ func parseModeList(spec string) ([]parallel.TrainMode, error) {
 func filterRemovedModes(in []parallel.TrainMode) []parallel.TrainMode {
 	out := make([]parallel.TrainMode, 0, len(in))
 	for _, m := range in {
-		if removedTrainModes[m] {
+		if !keptTrainModes[m] {
 			continue
 		}
 		out = append(out, m)

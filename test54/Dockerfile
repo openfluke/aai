@@ -9,10 +9,10 @@ EXPOSE 8080
 ENV TEST54_LAYERS=mamba \
     TEST54_MODES=all \
     TEST54_DTYPES=all \
-    TEST54_LRS=0.05 \
+    TEST54_LRS=funny-lo \
     TEST54_WORKERS=4 \
     TEST54_DURATION=15s \
-    TEST54_LR=0.05 \
+    TEST54_LR=0.5 \
     TEST54_HIDDEN=32 \
     TEST54_DEPTH=4 \
     TEST54_CKPT=/app/test54_ckpt \

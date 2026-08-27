@@ -1,10 +1,10 @@
-# Override for lo farm (./run-docker-lo.sh). Same LR as hi — band is port/ckpt only.
+# Override for lo farm (./run-docker-lo.sh): 0.5, 5, 50, 500, 5000
 services:
   test54:
     container_name: "${TEST54_CONTAINER_NAME:-test54-lo}"
     image: test54:local
     environment:
-      TEST54_LRS: "${TEST54_LRS:-0.05}"
+      TEST54_LRS: "${TEST54_LRS:-funny-lo}"
       TEST54_DURATION: "${TEST54_DURATION:-15s}"
       TEST54_DEPTH: "${TEST54_DEPTH:-4}"
       TEST54_CAMS: "${TEST54_CAMS:-1}"

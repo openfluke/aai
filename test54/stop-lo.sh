@@ -9,7 +9,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DIR/layer-env.sh"
 test54_parse_layer_args "$@"
 set -- ${TEST54_REMAINING_ARGS[@]+"${TEST54_REMAINING_ARGS[@]}"}
-export TEST54_LRS="${TEST54_LRS:-0.05}"
+export TEST54_LRS="${TEST54_LRS:-funny-lo}"
 
 for cam in "${TEST54_CAMS_LIST[@]}"; do
   unset TIDE_PORT TEST54_CONTAINER_NAME TEST54_PROJECT TEST54_CKPT_HOST || true
