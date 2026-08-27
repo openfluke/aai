@@ -26,10 +26,11 @@ func main() {
 		"allow POST /api/register to add peers (default off — .env list only)")
 	flag.Parse()
 
-	peers := parsePeers(*peersFlag)
+	peers := resolvePeers(*peersFlag)
 	if len(peers) == 0 {
-		fmt.Fprintln(os.Stderr, "error: set TIDE_PEERS in .env (or -peers)")
-		fmt.Fprintln(os.Stderr, "  example: TIDE_PEERS=m4=http://192.168.0.22:8080,m5=http://192.168.0.244:8082")
+		fmt.Fprintln(os.Stderr, "error: set TIDE_PEERS and/or TIDE_PEER_HOST + TIDE_CAMS in .env")
+		fmt.Fprintln(os.Stderr, "  example: TIDE_PEER_HOST=192.168.0.22  TIDE_CAMS=1,3  TIDE_BANDS=lo,hi")
+		fmt.Fprintln(os.Stderr, "  or:      TIDE_PEERS=cam1-lo=http://192.168.0.22:8080,cam3-lo=http://192.168.0.22:8100")
 		os.Exit(2)
 	}
 	if err := os.MkdirAll(*outDir, 0o755); err != nil {

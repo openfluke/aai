@@ -158,13 +158,19 @@ case "$cmd" in
       cp .env.example .env
       echo "wrote .env"
     fi
-    if command -v lsof >/dev/null 2>&1; then
+    if command -v lsof >/dev/null 2>&1 && [[ "${TEST53_FORCE_PORT:-}" == "1" ]]; then
       pids=$(lsof -tiTCP:"${TIDE_PORT}" -sTCP:LISTEN 2>/dev/null || true)
       if [[ -n "${pids:-}" ]]; then
-        echo "killing host listeners on :${TIDE_PORT} → $pids"
+        echo "TEST53_FORCE_PORT=1 — killing host listeners on :${TIDE_PORT} → $pids"
         # shellcheck disable=SC2086
         kill $pids 2>/dev/null || true
         sleep 1
+      fi
+    elif command -v lsof >/dev/null 2>&1; then
+      pids=$(lsof -tiTCP:"${TIDE_PORT}" -sTCP:LISTEN 2>/dev/null || true)
+      if [[ -n "${pids:-}" ]]; then
+        echo "warn: :${TIDE_PORT} already in use (pid $pids) — not killing (set TEST53_FORCE_PORT=1 to override)"
+        echo "      another cam/band may be running; use ./status-all.sh to check"
       fi
     fi
     echo "engine=$ENGINE  project=$PROJECT  lrs=$TEST53_LRS"

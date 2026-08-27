@@ -41,6 +41,21 @@ lr↑ → mode → dtype → kind
 
 Port formula: `8080 + (cam−1)×10 + band` (lo +0, neg +1, hi +2).
 
+Each cam×band is a **separate compose project** (`test53-lo`, `test53-cam3-lo`, …) — they can run in parallel:
+
+```bash
+./run-docker-lo.sh dense --build          # cam1 lo → project test53-lo :8080
+./run-docker-lo.sh cam3 dense --build     # cam3 lo → project test53-cam3-lo :8100
+./status-all.sh                           # see what's up
+```
+
+Finished jobs stay in ckpt — restart tide only (no `--build` if binary exists):
+
+```bash
+./run-docker-lo.sh dense                  # cam1 lo serves /api/report again
+./run-docker-hi.sh dense                  # cam1 hi :8082
+```
+
 Default layer is **`dense`** if omitted. Use `TEST53_LAYERS=all` only when you really want all 16 layers in one go (~63k jobs per half).
 
 Presets via `TEST53_LRS` / `-lrs`:

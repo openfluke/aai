@@ -21,7 +21,24 @@ Needs sibling `chaosglue/tide` (and welvet/webgpu via replace) next to `welvet/`
 |-----|---------|
 | `OCEAN_ADDR` | listen (default `0.0.0.0:8090`) |
 | `OCEAN_TITLE` | UI title |
-| `TIDE_PEERS` | comma list of tide origins |
+| `TIDE_PEERS` | comma list of tide origins (optional if using auto cam peers) |
+| `TIDE_PEER_HOST` | host/IP for test53 tides (with `TIDE_CAMS`) |
+| `TIDE_CAMS` | comma cam counts: `1,3` → ports 8080/8100 (lo), 8082/8102 (hi) |
+| `TIDE_BANDS` | comma LR bands: `lo,hi` (default `lo,hi`) |
+
+Auto cam peers (easiest for **cam1 vs cam3** compare):
+
+```bash
+TIDE_PEER_HOST=192.168.0.22
+TIDE_CAMS=1,3
+TIDE_BANDS=lo,hi
+```
+
+Or explicit URLs:
+
+```bash
+TIDE_PEERS=cam1-lo=http://192.168.0.22:8080,cam3-lo=http://192.168.0.22:8100
+```
 
 Compare **two machines** (or **cam counts**) across **all funny-LRs** in each tide archive (test53 puts `|lr=…` on every cell ID). Name peers with a machine prefix:
 
