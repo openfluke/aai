@@ -9,7 +9,7 @@ cd "$DIR"
 # shellcheck source=layer-env.sh
 source "$DIR/layer-env.sh"
 test53_parse_layer_args "$@"
-set -- "${TEST53_REMAINING_ARGS[@]}"
+set -- ${TEST53_REMAINING_ARGS[@]+"${TEST53_REMAINING_ARGS[@]}"}
 
 export TEST53_LRS="${TEST53_LRS:-funny-hi}"
 test53_apply_cam_env hi
