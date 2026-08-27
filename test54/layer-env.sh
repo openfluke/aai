@@ -126,7 +126,7 @@ test54_run_for_cams() {
     export TEST54_CKPT_HOST="$(test54_ckpt_host_for_layer "$root" "$TEST54_LAYER")"
     export TEST54_COMPOSE_OVERRIDE="$override"
     mkdir -p "$TEST54_CKPT_HOST"
-    echo "test54 ${band^^} · cam=$cam · layer=$TEST54_LAYER  depth=${TEST54_DEPTH:-4}  lrs=${TEST54_LRS:-0.05}  dur=${TEST54_DURATION:-15s}  ckpt=$TEST54_CKPT_HOST  tide=:$TIDE_PORT"
+    echo "test54 ${band} · cam=$cam · layer=$TEST54_LAYER  depth=${TEST54_DEPTH:-4}  lrs=${TEST54_LRS:-0.05}  dur=${TEST54_DURATION:-15s}  ckpt=$TEST54_CKPT_HOST  tide=:$TIDE_PORT"
     "$DIR/run-docker.sh" "$@"
   done
 }
