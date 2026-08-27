@@ -3,10 +3,12 @@
 cat <<'EOF'
 test54 — deep sandwich (stem + mid×DEPTH + head). Default DEPTH=4, LR=0.05, dur=15s.
 
-  ./run-docker-lo.sh mamba --build
-  ./run-docker-lo.sh cam3 mamba --build
-  ./stop-lo.sh
-  ./run-docker-lo.sh cam3 lstm --build
+  ./run-docker-lo.sh mamba --build              # cam1 :9080
+  ./run-docker-lo.sh cam3 mamba --build         # cam3 :9100
+  ./run-docker-lo.sh both mamba --build         # cam1 + cam3
+  ./run-docker-hi.sh both mamba --build         # m5: cam1-hi + cam3-hi
+  ./stop-lo.sh both
+  ./status-all.sh
 
 Layers (16):
   dense
@@ -15,5 +17,5 @@ Layers (16):
   mha lstm rnn mamba gdn swiglu residual
   layernorm rmsnorm
 
-~1 LR × 21 modes × 34 dtypes ≈ 714 jobs per layer.
+~1 LR × 21 modes × 34 dtypes ≈ 714 jobs per layer per cam.
 EOF

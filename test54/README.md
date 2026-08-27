@@ -8,23 +8,35 @@ Same dayroute task as test53, but:
 - **21 modes** (same cut as test53 `remove_train_modes.md`)
 - **Default layer:** `mamba`
 
-## Run one layer
+## Run one layer (cam1 and/or cam3)
 
 ```bash
-./run-docker-lo.sh mamba --build          # cam1 → :9080
-./run-docker-lo.sh cam3 mamba --build     # tricameral → :9100
-./run-docker-hi.sh cam3 mamba --build     # second machine / hi port :9102
+./run-docker-lo.sh mamba --build           # cam1 only → :9080
+./run-docker-lo.sh cam3 mamba --build      # cam3 only → :9100
+./run-docker-lo.sh both mamba --build      # cam1 + cam3 (two compose projects)
 
-./stop-lo.sh cam3
-./run-docker-lo.sh cam3 lstm --build
+./run-docker-hi.sh both mamba --build      # second machine: cam1-hi :9082 + cam3-hi :9102
+
+./stop-lo.sh both
+./stop-hi.sh cam3
+./run-docker-lo.sh both lstm --build
+./status-all.sh                            # list cam1/cam3 × lo/hi
 ```
 
 | Script | LR | Tide | Ckpt |
 |--------|----|------|------|
-| `./run-docker-lo.sh [camN] [layer]` | 0.05 | `:9080` / `:9100` | `test54_ckpt[_camN]/<layer>/` |
-| `./run-docker-hi.sh [camN] [layer]` | 0.05 | `:9082` / `:9102` | `test54_ckpt_hi[_camN]/<layer>/` |
+| `./run-docker-lo.sh [cam1\|cam3\|both] [layer]` | 0.05 | `:9080` / `:9100` | `test54_ckpt[_camN]/<layer>/` |
+| `./run-docker-hi.sh [cam1\|cam3\|both] [layer]` | 0.05 | `:9082` / `:9102` | `test54_ckpt_hi[_camN]/<layer>/` |
 
-lo/hi here only split **port + ckpt** so two machines can farm in parallel — same LR.
+Each cam×band is its **own** compose project (same as test53). `both` starts cam1 then cam3.
+
+lo/hi only split **port + ckpt** so two machines can farm in parallel — same LR.
+
+Ocean peers example (test54 ports):
+
+```
+TIDE_PEERS=cam1-lo=http://HOST:9080,cam3-lo=http://HOST:9100,cam1-hi=http://HOST2:9082,cam3-hi=http://HOST2:9102
+```
 
 ## Knobs
 
