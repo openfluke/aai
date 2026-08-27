@@ -23,18 +23,29 @@ const (
 	defaultHidden  = 32
 )
 
-// Default mode list — every named update the user listed (Mesh* on fixed 1³).
+// Default mode list (Mesh* on fixed 1³). Modes in remove_train_modes.md are omitted.
 var defaultModesCSV = strings.Join([]string{
-	"sgd", "step_sgd", "tween", "tween_chain", "step_tween", "step_tween_chain",
-	"MeshBP", "MeshTween", "MeshTweenChain", "TweenSplit", "StepTweenSplit",
-	"TweenAlt", "StepTweenAlt", "TweenSplitHeadProxy", "TweenSplitLinear",
+	"sgd", "step_sgd", "step_tween_chain",
+	"MeshTween", "TweenSplit", "StepTweenSplit",
+	"TweenSplitHeadProxy", "TweenSplitLinear",
 	"TweenSplitFastProxy", "TweenSplitLinearCache", "TweenSplitHeadProxyAsync",
-	"TweenSplitSparse", "MeshTweenSplit", "MeshTweenAlt", "MeshTweenSplitFastProxy",
+	"TweenSplitSparse", "MeshTweenSplit", "MeshTweenSplitFastProxy",
 	"MeshTweenSplitSparse", "StepTweenSplitHeadProxy", "StepTweenSplitLinear",
 	"StepTweenSplitFastProxy", "StepTweenSplitLinearCache",
 	"StepTweenSplitHeadProxyAsync", "StepTweenSplitSparse",
 }, ",")
 
+// removedTrainModes — first-pass cut for temporal/3D search (see remove_train_modes.md).
+var removedTrainModes = map[parallel.TrainMode]bool{
+	parallel.ModeTween:          true, // tween / [T]
+	parallel.ModeTweenChain:     true, // tween_chain / [T]Chain
+	parallel.ModeStepTween:      true, // step_tween / Step[T]
+	parallel.ModeTweenAlt:       true, // TweenAlt / [T]Alt
+	parallel.ModeStepTweenAlt:   true, // StepTweenAlt / Step[T]Alt
+	parallel.ModeMeshBP:         true, // MeshBP
+	parallel.ModeMeshTweenAlt:   true, // MeshTweenAlt / Mesh[T]Alt
+	parallel.ModeMeshTweenChain: true, // MeshTweenChain / Mesh[T]Chain
+}
 // Funny LR ramp: 0.02 → 2 → 200 → 2k → 20k → 1m → 10m → 100m
 var defaultFunnyLRs = []float64{0.02, 2, 200, 2000, 20000, 1e6, 1e7, 1e8}
 
@@ -431,34 +442,46 @@ func lrsCSV(lrs []float64) string {
 
 func parseModeList(spec string) ([]parallel.TrainMode, error) {
 	spec = strings.TrimSpace(spec)
-	if spec == "" || strings.EqualFold(spec, "all") {
-		return parallel.AllNamedTrainModes(), nil
-	}
 	var out []parallel.TrainMode
-	seen := map[parallel.TrainMode]bool{}
-	for _, tok := range strings.FieldsFunc(spec, func(r rune) bool {
-		return r == ',' || r == ' ' || r == ';'
-	}) {
-		tok = strings.TrimSpace(tok)
-		if tok == "" {
-			continue
+	if spec == "" || strings.EqualFold(spec, "all") {
+		out = append(out, parallel.AllNamedTrainModes()...)
+	} else {
+		seen := map[parallel.TrainMode]bool{}
+		for _, tok := range strings.FieldsFunc(spec, func(r rune) bool {
+			return r == ',' || r == ' ' || r == ';'
+		}) {
+			tok = strings.TrimSpace(tok)
+			if tok == "" {
+				continue
+			}
+			m, err := parallel.ParseTrainMode(tok)
+			if err != nil {
+				return nil, err
+			}
+			if m == parallel.ModeInherit || seen[m] {
+				continue
+			}
+			seen[m] = true
+			out = append(out, m)
 		}
-		m, err := parallel.ParseTrainMode(tok)
-		if err != nil {
-			return nil, err
-		}
-		if m == parallel.ModeInherit || seen[m] {
-			continue
-		}
-		seen[m] = true
-		out = append(out, m)
 	}
+	out = filterRemovedModes(out)
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no modes in %q", spec)
 	}
 	return out, nil
 }
 
+func filterRemovedModes(in []parallel.TrainMode) []parallel.TrainMode {
+	out := make([]parallel.TrainMode, 0, len(in))
+	for _, m := range in {
+		if removedTrainModes[m] {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
 func runJob(j Job, seed int64, hidden, nCams int, dur time.Duration) modeResult {
 	lr := j.LR
 	r := modeResult{

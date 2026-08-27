@@ -15,7 +15,7 @@ Agent picks **1 of 6 actions**: N / S / E / W / ACT / WAIT.
 lr↑ → mode → dtype → kind
 ```
 
-**One layer per run** (~4 × 29 × 34 ≈ **3.9k jobs** per lo/hi half). Finish a layer, stop, start the next:
+**One layer per run** (~4 × 21 × 34 ≈ **2.9k jobs** per lo/hi half). Finish a layer, stop, start the next:
 
 ```bash
 ./run-docker-lo.sh dense --build
@@ -74,7 +74,7 @@ Presets via `TEST53_LRS` / `-lrs`:
 | Knob | Default |
 |------|---------|
 | layers | **`dense`** (one layer; set `all` for full matrix) |
-| modes | **all 29** named train modes |
+| modes | **21** named train modes (`all` minus `remove_train_modes.md`) |
 | dtypes | **all 34** |
 | lrs | **funny-lo** (0.02…2k; use `./run-docker-hi.sh` for extremes) |
 | cams | **1** (single mid; `./run-docker-lo.sh cam3` for tricameral) |

@@ -15,5 +15,5 @@ Layers (16):
   mha lstm rnn mamba gdn swiglu residual
   layernorm rmsnorm
 
-~4 LRs × 29 modes × 34 dtypes ≈ 3.9k jobs per layer (lo or hi half).
+~4 LRs × 21 modes × 34 dtypes ≈ 2.9k jobs per layer (lo or hi half).
 EOF
