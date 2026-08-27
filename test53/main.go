@@ -115,6 +115,7 @@ func main() {
 	dtypesFlag := flag.String("dtypes", EnvOr("TEST53_DTYPES", "all"), "all|csv")
 	lrsFlag := flag.String("lrs", EnvOr("TEST53_LRS", "funny-lo"),
 		"funny-lo|lo = 0.02…2k; funny-hi|hi = 20k…100m; funny|all = full +ramp; funny-neg|neg; funny±|pm; or csv; empty = -lr once")
+	camsFlag := flag.String("cams", EnvOr("TEST53_CAMS", "1"), "Welvet Parallel branch count (1=dense, 3=tricameral, …)")
 	workersFlag := flag.Int("workers", EnvInt("TEST53_WORKERS", 0), "0 = NumCPU")
 	dur := flag.Duration("duration", EnvDuration("TEST53_DURATION", 2*time.Second), "wall per job")
 	lrOnce := flag.Float64("lr", EnvFloat("TEST53_LR", 0.05), "single LR when -lrs is empty")
@@ -131,6 +132,8 @@ func main() {
 	dtypes, err := parseDTypeList(*dtypesFlag)
 	must(err)
 	lrs, err := parseLRList(*lrsFlag, *lrOnce)
+	must(err)
+	nCams, err := parseCams(*camsFlag)
 	must(err)
 
 	ckptPath := resolveCkpt(*ckpt, kinds)
@@ -150,10 +153,10 @@ func main() {
 	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
 	fmt.Printf("task=dayroute  grid=%dx%d  days=%d  acts=%d  schedule=%v\n",
 		gridSize, gridSize, nDays, nActs, []string{"wake", "bath", "breakfast", "work", "lunch", "gym", "couch", "sleep"})
-	fmt.Printf("kinds=%d modes=%d dtypes=%d lrs=%d jobs=%d workers=%d leafMultiCore=%v dur=%s\n",
-		len(kinds), len(modes), len(dtypes), len(lrs), len(jobs), workers, leafMultiCore, *dur)
+	fmt.Printf("kinds=%d modes=%d dtypes=%d lrs=%d cams=%d jobs=%d workers=%d leafMultiCore=%v dur=%s\n",
+		len(kinds), len(modes), len(dtypes), len(lrs), nCams, len(jobs), workers, leafMultiCore, *dur)
 	fmt.Printf("kinds=%s\n", kindsCSV(kinds))
-	fmt.Printf("lrs=%s\n", lrsCSV(lrs))
+	fmt.Printf("lrs=%s  cams=%d (%s)\n", lrsCSV(lrs), nCams, camName(nCams))
 	fmt.Printf("clock=%s  ckpt=%s\n\n", dutyClockName(), ckptPath)
 
 	store := NewStore(ckptPath)
@@ -194,7 +197,7 @@ func main() {
 	fmt.Printf("resume: done=%d pending=%d  ckpt=%d result(s) on disk\n",
 		len(jobs)-len(pending), len(pending), len(results))
 
-	tide := startTideBridge(*tideAddr, jobs, lrs[0], kinds)
+	tide := startTideBridge(*tideAddr, jobs, lrs[0], kinds, nCams)
 	alreadyDone := len(jobs) - len(pending)
 	if tide != nil {
 		tide.seedCompleted(results)
@@ -234,7 +237,7 @@ func main() {
 					tide.beginJob(j, "train", alreadyDone+n-1, len(jobs))
 				}
 				t0 := time.Now()
-				res := runJob(j, seed, *hidden, *dur)
+				res := runJob(j, seed, *hidden, nCams, *dur)
 				outCh <- leafOut{job: j, res: res, started: t0, ended: time.Now()}
 			}
 		}(int64(w+1) * 9973)
@@ -456,12 +459,12 @@ func parseModeList(spec string) ([]parallel.TrainMode, error) {
 	return out, nil
 }
 
-func runJob(j Job, seed int64, hidden int, dur time.Duration) modeResult {
+func runJob(j Job, seed int64, hidden, nCams int, dur time.Duration) modeResult {
 	lr := j.LR
 	r := modeResult{
 		ID: j.ID, Layer: string(j.Kind), DType: j.DType.String(), Mode: j.Mode.String(), LR: lr,
 	}
-	st, err := buildSandwich(j.Kind, obsDim, hidden, nActs, j.DType)
+	st, err := buildSandwich(j.Kind, obsDim, hidden, nActs, j.DType, nCams)
 	if err != nil {
 		r.Err = err.Error()
 		return r

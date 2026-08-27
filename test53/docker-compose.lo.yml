@@ -1,7 +1,8 @@
 # Override for mild funny-LR farm (./run-docker-lo.sh).
 services:
   test53:
-    container_name: test53-lo
+    container_name: "${TEST53_CONTAINER_NAME:-test53-lo}"
     image: test53:local
     environment:
       TEST53_LRS: "${TEST53_LRS:-funny-lo}"
+      TEST53_CAMS: "${TEST53_CAMS:-1}"

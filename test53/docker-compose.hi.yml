@@ -2,7 +2,8 @@
 # Port comes from TIDE_PORT (default 8082 via the wrapper).
 services:
   test53:
-    container_name: test53-hi
+    container_name: "${TEST53_CONTAINER_NAME:-test53-hi}"
     image: test53:local
     environment:
       TEST53_LRS: "${TEST53_LRS:-funny-hi}"
+      TEST53_CAMS: "${TEST53_CAMS:-1}"

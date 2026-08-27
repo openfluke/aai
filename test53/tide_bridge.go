@@ -16,20 +16,24 @@ import (
 )
 
 type tideBridge struct {
-	tr  *pulse.Tracker
-	srv *dash.Server
+	tr   *pulse.Tracker
+	srv  *dash.Server
+	cams int
 }
 
-func startTideBridge(addr string, jobs []Job, lr float64, kinds []CellKind) *tideBridge {
+func startTideBridge(addr string, jobs []Job, lr float64, kinds []CellKind, cams int) *tideBridge {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
 		return nil
+	}
+	if cams < 1 {
+		cams = 1
 	}
 	listen := normalizeAddr(addr)
 	cells := make([]permute.Cell, 0, len(jobs))
 	seen := map[string]bool{}
 	for _, j := range jobs {
-		c := jobToTideCell(j)
+		c := jobToTideCell(j, cams)
 		if seen[c.ID] {
 			continue
 		}
@@ -37,10 +41,11 @@ func startTideBridge(addr string, jobs []Job, lr float64, kinds []CellKind) *tid
 		cells = append(cells, c)
 	}
 	tr := pulse.New()
-	subtitle := "dayroute · layer × mode × dtype × funny-LR"
+	subtitle := fmt.Sprintf("dayroute · %d-cam × mode × dtype × funny-LR", cams)
 	if len(kinds) == 1 {
-		subtitle = fmt.Sprintf("dayroute · %s × mode × dtype × funny-LR", kinds[0])
+		subtitle = fmt.Sprintf("dayroute · %s · %d-cam × mode × dtype × funny-LR", kinds[0], cams)
 	}
+	tideID := EnvOr("TEST53_TIDE_ID", tideIDForCams(cams))
 	srv := &dash.Server{
 		Tracker:  tr,
 		Cells:    cells,
@@ -49,7 +54,7 @@ func startTideBridge(addr string, jobs []Job, lr float64, kinds []CellKind) *tid
 		Task:     "test53-dayroute",
 		Subtitle: subtitle,
 		LR:       lr,
-		ID:       "test53",
+		ID:       tideID,
 	}
 	// Auto-start: test53 does not wait for the dash Start button.
 	srv.SignalStart()
@@ -58,8 +63,8 @@ func startTideBridge(addr string, jobs []Job, lr float64, kinds []CellKind) *tid
 			fmt.Fprintf(os.Stderr, "tide dash: %v\n", err)
 		}
 	}()
-	fmt.Printf("tide  http://<host>:%s  (Lucy + /api/report.pdf)\n", portOf(listen))
-	return &tideBridge{tr: tr, srv: srv}
+	fmt.Printf("tide  http://<host>:%s  id=%s  cams=%d  (Lucy + /api/report.pdf)\n", portOf(listen), tideID, cams)
+	return &tideBridge{tr: tr, srv: srv, cams: cams}
 }
 
 func (t *tideBridge) signalStart() {
@@ -104,7 +109,7 @@ func (t *tideBridge) beginJob(job Job, phase string, done, total int) {
 	}
 	msg := fmt.Sprintf("%s · %s · %d/%d · %d left", phase, job.ID, done, total, left)
 	t.tr.SetMeta(done, total, done, total, msg)
-	t.tr.Begin(jobToTideCell(job), phase)
+	t.tr.Begin(jobToTideCell(job, t.cams), phase)
 }
 
 func (t *tideBridge) pulseRunning(r modeResult) {
@@ -134,7 +139,7 @@ func (t *tideBridge) commitJob(j Job, r modeResult, started, ended time.Time) {
 	if r.Err != "" {
 		status, note = "fail", r.Err
 	}
-	t.tr.Commit(jobToTideCell(j), 1, status, note, tideSnap(r), started, ended)
+	t.tr.Commit(jobToTideCell(j, t.cams), 1, status, note, tideSnap(r), started, ended)
 }
 
 func (t *tideBridge) seedCompleted(rows []modeResult) {
@@ -149,7 +154,7 @@ func (t *tideBridge) seedCompleted(rows []modeResult) {
 		}
 		// Seeded rows have no wall duration — Commit with equal times so they
 		// are ignored by pace (minPaceSec filter).
-		t.tr.Commit(resultToTideCell(r), 1, "ok", r.Layer, tideSnap(r), now, now)
+		t.tr.Commit(resultToTideCell(r, t.cams), 1, "ok", r.Layer, tideSnap(r), now, now)
 		n++
 	}
 	if n > 0 {
@@ -197,15 +202,21 @@ func tideSnap(r modeResult) lucy.Snapshot {
 	return snap
 }
 
-func jobToTideCell(j Job) permute.Cell {
+func jobToTideCell(j Job, cams int) permute.Cell {
+	if cams < 1 {
+		cams = 1
+	}
 	return permute.Cell{
 		ID: j.ID, DType: j.DType, Format: quant.FormatNone,
-		Mode: welvetModeToTide(j.Mode), Arch: permute.ArchForCams(1), Cams: 1,
+		Mode: welvetModeToTide(j.Mode), Arch: permute.ArchForCams(cams), Cams: cams,
 		Backend: core.BackendCPUTiled, UseSIMD: j.Kind == KindDense && j.DType == core.DTypeFloat32,
 	}
 }
 
-func resultToTideCell(r modeResult) permute.Cell {
+func resultToTideCell(r modeResult, cams int) permute.Cell {
+	if cams < 1 {
+		cams = 1
+	}
 	dt := core.ParseDType(r.DType)
 	mode, err := parallel.ParseTrainMode(r.Mode)
 	if err != nil {
@@ -213,7 +224,7 @@ func resultToTideCell(r modeResult) permute.Cell {
 	}
 	return permute.Cell{
 		ID: r.ID, DType: dt, Format: quant.FormatNone,
-		Mode: welvetModeToTide(mode), Arch: permute.ArchForCams(1), Cams: 1,
+		Mode: welvetModeToTide(mode), Arch: permute.ArchForCams(cams), Cams: cams,
 		Backend: core.BackendCPUTiled,
 	}
 }

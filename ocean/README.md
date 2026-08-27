@@ -23,11 +23,12 @@ Needs sibling `chaosglue/tide` (and welvet/webgpu via replace) next to `welvet/`
 | `OCEAN_TITLE` | UI title |
 | `TIDE_PEERS` | comma list of tide origins |
 
-Compare **two machines** across **all funny-LRs** in each tide archive (test53 puts `|lr=…` on every cell ID). Name peers with a machine prefix:
+Compare **two machines** (or **cam counts**) across **all funny-LRs** in each tide archive (test53 puts `|lr=…` on every cell ID). Name peers with a machine prefix:
 
 ```bash
+TIDE_PEERS=cam1-lo=http://192.168.0.22:8080,cam3-lo=http://192.168.0.22:8100
 TIDE_PEERS=m4-lo=http://192.168.0.22:8080,m5-lo=http://192.168.0.244:8080
-TIDE_PEERS=m4-lo=http://192.168.0.22:8080,m4-hi=http://192.168.0.22:8082,m5-lo=http://192.168.0.244:8080,m5-hi=http://192.168.0.244:8082
+TIDE_PEERS=cam1-lo=...,cam1-hi=http://192.168.0.22:8082,cam3-lo=...,cam3-hi=http://192.168.0.22:8102
 ```
 
 Or bare URLs (`tide-1`, `tide-2`, …):

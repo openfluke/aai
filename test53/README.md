@@ -27,9 +27,19 @@ lr↑ → mode → dtype → kind
 
 | Script | LRs | Tide | Ckpt root |
 |--------|-----|------|-----------|
-| `./run-docker-lo.sh [layer]` | `0.02, 2, 200, 2000` | `:8080` | `test53_ckpt/<layer>/` |
-| `./run-docker-hi.sh [layer]` | `20000, 1m, 10m, 100m` | `:8082` | `test53_ckpt_hi/<layer>/` |
-| `./run-docker-neg.sh [layer]` | −ramp | `:8081` | `test53_ckpt_neg/<layer>/` |
+| `./run-docker-lo.sh [camN] [layer]` | `0.02, 2, 200, 2000` | `:8080` (cam1) · `:8100` (cam3) | `test53_ckpt[_camN]/<layer>/` |
+| `./run-docker-hi.sh [camN] [layer]` | `20000, 1m, 10m, 100m` | `:8082` (cam1) · `:8102` (cam3) | `test53_ckpt_hi[_camN]/<layer>/` |
+| `./run-docker-neg.sh [camN] [layer]` | −ramp | `:8081` (cam1) · `:8101` (cam3) | `test53_ckpt_neg[_camN]/<layer>/` |
+
+**Cam × LR band:** run cam1 and cam3 in parallel — separate ports, ckpts, containers:
+
+```bash
+./run-docker-lo.sh dense --build          # cam1 (default) → :8080
+./run-docker-lo.sh cam3 dense --build     # tricameral mid  → :8100
+# ocean compare: cam1-lo=http://host:8080,cam3-lo=http://host:8100
+```
+
+Port formula: `8080 + (cam−1)×10 + band` (lo +0, neg +1, hi +2).
 
 Default layer is **`dense`** if omitted. Use `TEST53_LAYERS=all` only when you really want all 16 layers in one go (~63k jobs per half).
 
@@ -52,6 +62,7 @@ Presets via `TEST53_LRS` / `-lrs`:
 | modes | **all 29** named train modes |
 | dtypes | **all 34** |
 | lrs | **funny-lo** (0.02…2k; use `./run-docker-hi.sh` for extremes) |
+| cams | **1** (single mid; `./run-docker-lo.sh cam3` for tricameral) |
 | workers | NumCPU (or 4 via `.env` / Docker) |
 | duration | 2s/job |
 | Tide | `:8080` |

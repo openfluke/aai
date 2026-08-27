@@ -72,9 +72,13 @@ func camName(nHemi int) string {
 // leafMultiCore: false when many leaf-workers share the machine.
 var leafMultiCore = true
 
-// buildSandwich: Dense(in→hidden) → mid(kind) → Dense(hidden→out). Always 1 mid
-// (no cams). Mesh* modes place this stack on a fixed 1×1×1 origin grid at train time.
-func buildSandwich(kind CellKind, in, hidden, out int, dt core.DType) (*parallel.Stack, error) {
+// buildSandwich: Dense(in→hidden) → mid(kind) → Dense(hidden→out).
+// nCams>1 fans the mid Op into parallel branches (Welvet cameral merge).
+// Mesh* modes place this stack on a fixed 1×1×1 origin grid at train time.
+func buildSandwich(kind CellKind, in, hidden, out int, dt core.DType, nCams int) (*parallel.Stack, error) {
+	if nCams < 1 {
+		nCams = 1
+	}
 	if in <= 0 || hidden <= 0 || out <= 0 {
 		return nil, fmt.Errorf("test53: need positive in/hidden/out")
 	}
@@ -83,14 +87,31 @@ func buildSandwich(kind CellKind, in, hidden, out int, dt core.DType) (*parallel
 	if err != nil {
 		return nil, fmt.Errorf("stem: %w", err)
 	}
-	mid, err := newHemisphereOp(kind, hidden)
-	if err != nil {
-		return nil, fmt.Errorf("mid %s: %w", kind, err)
-	}
 	head, err := dense.NewConfigured[float32](hidden, out, core.ActivationLinear,
 		core.DTypeFloat32, quant.FormatNone, xavier(out, hidden))
 	if err != nil {
 		return nil, fmt.Errorf("head: %w", err)
+	}
+	var mid any
+	if nCams <= 1 {
+		mid, err = newHemisphereOp(kind, hidden)
+		if err != nil {
+			return nil, fmt.Errorf("mid %s: %w", kind, err)
+		}
+	} else {
+		branches := make([]any, nCams)
+		for i := 0; i < nCams; i++ {
+			branches[i], err = newHemisphereOp(kind, hidden)
+			if err != nil {
+				return nil, fmt.Errorf("mid %s hemi %d: %w", kind, i, err)
+			}
+		}
+		mid, err = parallel.HemispheresFrom(parallel.Config{
+			Dim: hidden, OutFeat: hidden, Branches: nCams, Combine: parallel.CombineAdd,
+		}, branches, nil)
+		if err != nil {
+			return nil, fmt.Errorf("mid %s ×%d: %w", kind, nCams, err)
+		}
 	}
 	s, err := parallel.Sandwich(stem, mid, head)
 	if err != nil {
